@@ -74,13 +74,21 @@ def create_transaction():
         return jsonify({'error': f'Insufficient stock. Available: {product.quantity}'}), 400
     
     # Create transaction
+    if data.get('transaction_date'):
+        try:
+            transaction_date = datetime.fromisoformat(data['transaction_date'])
+        except ValueError:
+            return jsonify({'error': 'Invalid transaction_date format'}), 400
+    else:
+        transaction_date = datetime.utcnow()
+    
     transaction = Transaction(
         product_id=data['product_id'],
         transaction_type=transaction_type,
         quantity=quantity,
         unit_price=data.get('unit_price', product.unit_price),
         notes=data.get('notes'),
-        transaction_date=datetime.fromisoformat(data['transaction_date']) if data.get('transaction_date') else datetime.utcnow()
+        transaction_date=transaction_date
     )
     
     # Update product quantity

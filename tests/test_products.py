@@ -118,4 +118,4 @@ def test_get_low_stock_products(client, sample_category, sample_supplier):
     assert response.status_code == 200
     data = json.loads(response.data)
     assert len(data) > 0
-    assert data[0]['needs_reorder'] == True
+    assert data[0]['needs_reorder'] is True

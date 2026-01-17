@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify
+from sqlalchemy import or_
 from app import db
 from app.models import Product, Category, Supplier
 
@@ -24,7 +25,7 @@ def get_products():
         query = query.filter(Product.quantity <= Product.reorder_level)
     if search:
         query = query.filter(
-            db.or_(
+            or_(
                 Product.name.ilike(f'%{search}%'),
                 Product.sku.ilike(f'%{search}%'),
                 Product.description.ilike(f'%{search}%')
