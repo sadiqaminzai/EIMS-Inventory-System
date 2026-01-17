@@ -1,0 +1,61 @@
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Models\Supplier;
+use App\Support\TenantContext;
+use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
+
+class SupplierController extends Controller
+{
+    public function index()
+    {
+        return Supplier::query()->orderBy('name')->get();
+    }
+
+    public function store(Request $request)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string'],
+            'email' => ['required', 'email', Rule::unique('suppliers', 'email')->where('tenant_id', TenantContext::getTenantId())],
+            'phone' => ['required', 'string'],
+            'address' => ['required', 'string'],
+            'tax_id' => ['nullable', 'string'],
+            'status' => ['nullable', 'string'],
+        ]);
+
+        $supplier = Supplier::create(array_merge($data, [
+            'created_by' => $request->user()->id,
+            'updated_by' => $request->user()->id,
+        ]));
+
+        return response()->json($supplier, 201);
+    }
+
+    public function update(Request $request, Supplier $supplier)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string'],
+            'email' => ['required', 'email', Rule::unique('suppliers', 'email')->where('tenant_id', TenantContext::getTenantId())->ignore($supplier->id)],
+            'phone' => ['required', 'string'],
+            'address' => ['required', 'string'],
+            'tax_id' => ['nullable', 'string'],
+            'status' => ['nullable', 'string'],
+        ]);
+
+        $supplier->update(array_merge($data, [
+            'updated_by' => $request->user()->id,
+        ]));
+
+        return response()->json($supplier);
+    }
+
+    public function destroy(Supplier $supplier)
+    {
+        $supplier->delete();
+
+        return response()->json(['message' => 'Deleted']);
+    }
+}
