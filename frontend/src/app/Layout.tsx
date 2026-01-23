@@ -229,9 +229,7 @@ export const Layout = () => {
           <NavItem to="/partners" label="Partners" icon={Users} perm="customer.view" />
 
           <SectionHeader label="Operations" shortLabel="OPS" />
-          <NavItem to="/purchases" label="Purchases" icon={ShoppingCart} perm="purchase.view" />
-          <NavItem to="/sales" label="Sales" icon={TrendingUp} perm="sales.view" />
-          <NavItem to="/returns" label="Returns" icon={Undo2} perm="return.view" />
+          <NavItem to="/invoices" label="Invoices" icon={TrendingUp} perm="sales.view" />
           <NavItem to="/accounts" label="Accounts" icon={Wallet} perm="account.view" />
 
           <SectionHeader label="System" shortLabel="SYS" />

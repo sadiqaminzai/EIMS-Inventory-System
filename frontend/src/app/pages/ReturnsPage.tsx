@@ -15,7 +15,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '../components/ui/toolti
 import { generateInvoicePDF } from '../utils/pdfGenerator';
 
 const ReturnForm = ({ initialData, onSave, onCancel }: { initialData?: Return, onSave: (data: any) => void, onCancel: () => void }) => {
-  const { customers, products, currentUser, returns, purchases } = useStore();
+  const { customers, products, currentUser, returns, purchases, printSettings } = useStore();
   const nextId = returns.length > 0 ? Math.max(...returns.map(r => parseInt(r.invoice_no) || 0)) + 1 : 1;
 
   const { register, control, handleSubmit, setValue, watch, setFocus, formState: { errors } } = useForm({
@@ -41,16 +41,21 @@ const ReturnForm = ({ initialData, onSave, onCancel }: { initialData?: Return, o
     let tax = 0;
 
     items.forEach((item, index) => {
-      const lineTotal = item.quantity * item.sale_price;
-      const itemDiscount = (lineTotal * (item.discount_percent || 0)) / 100;
-      const itemTax = ((lineTotal - itemDiscount) * (item.tax_percent || 0)) / 100;
+      // Only calculate if we have valid numeric data
+      const quantity = Number(item.quantity) || 0;
+      const salePrice = Number(item.sale_price) || 0;
+      const discountPercent = Number(item.discount_percent) || 0;
+      const taxPercent = Number(item.tax_percent) || 0;
+      
+      const lineTotal = quantity * salePrice;
+      const itemDiscount = (lineTotal * discountPercent) / 100;
+      const itemTax = ((lineTotal - itemDiscount) * taxPercent) / 100;
       const amount = lineTotal - itemDiscount + itemTax;
 
-      if (amount !== item.amount || itemDiscount !== item.discount || itemTax !== item.tax) {
-        setValue(`items.${index}.amount`, amount);
-        setValue(`items.${index}.discount`, itemDiscount);
-        setValue(`items.${index}.tax`, itemTax);
-      }
+      // Always update calculations to ensure consistency
+      setValue(`items.${index}.amount`, amount);
+      setValue(`items.${index}.discount`, itemDiscount);
+      setValue(`items.${index}.tax`, itemTax);
       
       sub += lineTotal;
       disc += itemDiscount;
@@ -61,7 +66,7 @@ const ReturnForm = ({ initialData, onSave, onCancel }: { initialData?: Return, o
     setValue('total_discount', disc);
     setValue('total_tax', tax);
     setValue('total_amount', sub - disc + tax);
-  }, [JSON.stringify(items.map(i => ({ q: i.quantity, p: i.sale_price, dp: i.discount_percent, tp: i.tax_percent }))), setValue]);
+  }, [items, setValue]);
 
   const handleProductChange = (index: number, productId: string) => {
     const prod = products.find(p => p.id === productId);
@@ -175,20 +180,46 @@ const ReturnForm = ({ initialData, onSave, onCancel }: { initialData?: Return, o
         </Button>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-gray-200">
-        <div className="col-span-1 md:col-span-2"></div>
-        <div className="col-span-1 md:col-span-2 grid grid-cols-2 gap-y-1 text-xs">
-           <div className="text-gray-500 text-right pr-4">Sub Total:</div>
-           <div className="font-bold text-right">{watch('sub_total').toFixed(2)}</div>
-           
-           <div className="text-gray-500 text-right pr-4">Total Discount:</div>
-           <div className="font-bold text-right text-red-600">-{watch('total_discount').toFixed(2)}</div>
-           
-           <div className="text-gray-500 text-right pr-4">Total Tax:</div>
-           <div className="font-bold text-right text-blue-600">+{watch('total_tax').toFixed(2)}</div>
-           
-           <div className="text-gray-900 font-bold text-right pr-4 text-sm pt-2 border-t border-gray-200">Total Refund:</div>
-           <div className="font-bold text-right text-sm pt-2 border-t border-gray-200 text-blue-700">${watch('total_amount').toFixed(2)}</div>
+      {/* Footer Totals - Single Row */}
+      <div className="mt-4 pt-4 border-t border-gray-200">
+        <div className="flex flex-wrap gap-4 text-xs bg-gray-50 p-3 rounded border">
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">Items:</span>
+            <span className="font-bold text-gray-900">{items.length}</span>
+          </div>
+          
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">Qty:</span>
+            <span className="font-bold text-blue-600">{items.reduce((sum, item) => sum + (item.quantity || 0), 0)}</span>
+          </div>
+          
+          {/* Only show bonus if enabled in settings */}
+          {printSettings?.show_bonus && (
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500">Bonus:</span>
+              <span className="font-bold text-green-600">{items.reduce((sum, item) => sum + (item.bonus || 0), 0)}</span>
+            </div>
+          )}
+          
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">Sub Total:</span>
+            <span className="font-bold text-gray-900">${watch('sub_total').toFixed(2)}</span>
+          </div>
+          
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">Discount:</span>
+            <span className="font-bold text-red-600">-${watch('total_discount').toFixed(2)}</span>
+          </div>
+          
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">Tax:</span>
+            <span className="font-bold text-blue-600">+${watch('total_tax').toFixed(2)}</span>
+          </div>
+          
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">Total Refund:</span>
+            <span className="font-bold text-blue-700">${watch('total_amount').toFixed(2)}</span>
+          </div>
         </div>
       </div>
 

@@ -15,7 +15,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '../components/ui/toolti
 import { generateInvoicePDF } from '../utils/pdfGenerator';
 
 const PurchaseForm = ({ initialData, onSave, onCancel }: { initialData?: Purchase, onSave: (data: any) => void, onCancel: () => void }) => {
-  const { suppliers, products, currentUser, purchases } = useStore();
+  const { suppliers, products, currentUser, purchases, printSettings } = useStore();
   const nextId = purchases.length > 0 ? Math.max(...purchases.map(p => parseInt(p.invoice_no) || 0)) + 1 : 1;
   
   const { register, control, handleSubmit, setValue, watch, setFocus, formState: { errors } } = useForm({
@@ -43,27 +43,34 @@ const PurchaseForm = ({ initialData, onSave, onCancel }: { initialData?: Purchas
     let tax = 0;
 
     items.forEach((item, index) => {
-      const lineTotal = item.quantity * item.cost_price;
-      const itemDiscount = (lineTotal * (item.discount_percent || 0)) / 100;
-      const itemTax = ((lineTotal - itemDiscount) * (item.tax_percent || 0)) / 100;
-      const amount = lineTotal - itemDiscount + itemTax;
-
-      if (amount !== item.amount || itemDiscount !== item.discount || itemTax !== item.tax) {
-        setValue(`items.${index}.amount`, amount);
-        setValue(`items.${index}.discount`, itemDiscount);
-        setValue(`items.${index}.tax`, itemTax);
-      }
+      // Only calculate if we have valid numeric data
+      const quantity = Number(item.quantity) || 0;
+      const costPrice = Number(item.cost_price) || 0;
+      const discountPercent = Number(item.discount_percent) || 0;
+      const taxPercent = Number(item.tax_percent) || 0;
       
-      sub += lineTotal;
-      disc += itemDiscount;
-      tax += itemTax;
+      if (quantity > 0 && costPrice > 0) {
+        const lineTotal = quantity * costPrice;
+        const itemDiscount = (lineTotal * discountPercent) / 100;
+        const itemTax = ((lineTotal - itemDiscount) * taxPercent) / 100;
+        const amount = lineTotal - itemDiscount + itemTax;
+
+        // Always update calculations to ensure consistency
+        setValue(`items.${index}.amount`, Number(amount.toFixed(2)));
+        setValue(`items.${index}.discount`, Number(itemDiscount.toFixed(2)));
+        setValue(`items.${index}.tax`, Number(itemTax.toFixed(2)));
+        
+        sub += lineTotal;
+        disc += itemDiscount;
+        tax += itemTax;
+      }
     });
 
-    setValue('sub_total', sub);
-    setValue('total_discount', disc);
-    setValue('total_tax', tax);
-    setValue('grand_total', sub - disc + tax);
-  }, [JSON.stringify(items.map(i => ({ q: i.quantity, c: i.cost_price, dp: i.discount_percent, tp: i.tax_percent }))), setValue]);
+    setValue('sub_total', Number(sub.toFixed(2)));
+    setValue('total_discount', Number(disc.toFixed(2)));
+    setValue('total_tax', Number(tax.toFixed(2)));
+    setValue('grand_total', Number((sub - disc + tax).toFixed(2)));
+  }, [items, setValue]);
 
   const handleProductChange = (index: number, productId: string) => {
     const prod = products.find(p => p.id === productId);
@@ -86,7 +93,7 @@ const PurchaseForm = ({ initialData, onSave, onCancel }: { initialData?: Purchas
   return (
     <form onSubmit={handleSubmit(onSave)} className="flex flex-col h-full">
       {/* Header Info */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 bg-gray-50 p-3 rounded border border-gray-200">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 bg-gray-50 p-3 rounded border border-gray-200">
         <Controller
           control={control}
           name="supplier_id"
@@ -102,107 +109,136 @@ const PurchaseForm = ({ initialData, onSave, onCancel }: { initialData?: Purchas
           )}
         />
         <DenseInput label="Purchase Date" type="date" {...register('purchase_date', { required: 'Required' })} />
-        <DenseInput label="Invoice No" {...register('invoice_no')} readOnly />
+        <div className="flex items-end">
+          <Button 
+            type="button" 
+            variant="ghost" 
+            size="sm"
+            onClick={() => append({ product_id: '', batch_no: '', quantity: 1, bonus: 0, cost_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, mfg_date: '', exp_date: '' })} 
+            className="text-blue-600 hover:text-blue-800 h-8"
+          >
+            <Plus className="h-3 w-3 mr-1" /> Add Item
+          </Button>
+        </div>
+        <div className="w-32">
+          <DenseInput label="Invoice No" {...register('invoice_no')} readOnly />
+        </div>
       </div>
 
-      {/* Items Table */}
-      <div className="flex-1 overflow-auto border border-gray-200 rounded">
-        <table className="w-full text-left border-collapse text-xs min-w-[800px]">
-          <thead className="bg-gray-100 sticky top-0 z-10 font-semibold text-gray-600">
-            <tr>
-              <th className="px-2 py-2 w-8">#</th>
-              <th className="px-2 py-2 w-48">Product</th>
-              <th className="px-2 py-2 w-24">Batch</th>
-              <th className="px-2 py-2 w-20">Exp Date</th>
-              <th className="px-2 py-2 w-16">Qty</th>
-              <th className="px-2 py-2 w-16">Bonus</th>
-              <th className="px-2 py-2 w-20">Cost</th>
-              <th className="px-2 py-2 w-16">Disc %</th>
-              <th className="px-2 py-2 w-16">Tax %</th>
-              <th className="px-2 py-2 w-24">Amount</th>
-              <th className="px-2 py-2 w-8"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {fields.map((field, index) => (
-              <tr key={field.id} className="hover:bg-blue-50">
-                <td className="px-2 py-1 text-center text-gray-500">{index + 1}</td>
-                <td className="px-2 py-1">
-                  <Controller
-                    control={control}
-                    name={`items.${index}.product_id`}
-                    rules={{ required: true }}
-                    render={({ field }) => (
-                      <SearchableSelect
-                        options={products.map(p => ({ value: p.id, label: p.name }))}
-                        value={field.value}
-                        onChange={(val) => {
-                            field.onChange(val);
-                            handleProductChange(index, val);
-                        }}
-                        placeholder="Select Product"
-                        width="300px"
-                      />
-                    )}
-                  />
-                </td>
-                <td className="px-2 py-1"><input className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.batch_no`)} /></td>
-                <td className="px-2 py-1"><input type="date" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.exp_date`)} /></td>
-                <td className="px-2 py-1"><input type="number" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.quantity`, { valueAsNumber: true })} /></td>
-                <td className="px-2 py-1"><input type="number" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.bonus`, { valueAsNumber: true })} /></td>
-                <td className="px-2 py-1"><input type="number" step="0.01" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.cost_price`, { valueAsNumber: true })} /></td>
-                <td className="px-2 py-1"><input type="number" step="0.01" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.discount_percent`, { valueAsNumber: true })} /></td>
-                <td className="px-2 py-1"><input type="number" step="0.01" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.tax_percent`, { valueAsNumber: true })} onKeyDown={(e) => handleKeyDown(e, index)} /></td>
-                <td className="px-2 py-1 font-medium text-right text-gray-700">{items[index]?.amount?.toFixed(2)}</td>
-                <td className="px-2 py-1 text-center">
-                  <button type="button" onClick={() => remove(index)} className="text-red-500 hover:bg-red-100 p-1 rounded"><Trash2 className="h-3 w-3" /></button>
-                </td>
+      {/* Items Table with Fixed Height (5 rows) */}
+      <div className="flex-1 overflow-hidden border border-gray-200 rounded">
+        <div className="h-[200px] overflow-auto">
+          <table className="w-full text-left border-collapse text-xs min-w-[800px]">
+            <thead className="bg-gray-100 sticky top-0 z-10 font-semibold text-gray-600">
+              <tr>
+                <th className="px-2 py-2 w-8">#</th>
+                <th className="px-2 py-2 w-48">Product</th>
+                <th className="px-2 py-2 w-24">Batch</th>
+                <th className="px-2 py-2 w-20">Exp Date</th>
+                <th className="px-2 py-2 w-16">Qty</th>
+                <th className="px-2 py-2 w-16">Bonus</th>
+                <th className="px-2 py-2 w-20">Cost</th>
+                <th className="px-2 py-2 w-16">Disc %</th>
+                <th className="px-2 py-2 w-16">Tax %</th>
+                <th className="px-2 py-2 w-24">Amount</th>
+                <th className="px-2 py-2 w-8"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="mt-2">
-        <Button 
-          type="button" 
-          variant="ghost" 
-          size="sm"
-          onClick={() => append({ product_id: '', batch_no: '', quantity: 1, bonus: 0, cost_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, mfg_date: '', exp_date: '' })} 
-          className="text-blue-600 hover:text-blue-800"
-        >
-          <Plus className="h-3 w-3 mr-1" /> Add Item
-        </Button>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {fields.map((field, index) => (
+                <tr key={field.id} className="hover:bg-blue-50">
+                  <td className="px-2 py-1 text-center text-gray-500">{index + 1}</td>
+                  <td className="px-2 py-1 w-48 max-w-[12rem] overflow-hidden">
+                    <Controller
+                      control={control}
+                      name={`items.${index}.product_id`}
+                      rules={{ required: true }}
+                      render={({ field }) => (
+                        <SearchableSelect
+                          options={products.map(p => ({ value: p.id, label: p.name }))}
+                          value={field.value}
+                          onChange={(val) => {
+                              field.onChange(val);
+                              handleProductChange(index, val);
+                          }}
+                          placeholder="Select Product"
+                          width="300px"
+                        />
+                      )}
+                    />
+                  </td>
+                  <td className="px-2 py-1"><input className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.batch_no`)} /></td>
+                  <td className="px-2 py-1"><input type="date" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.exp_date`)} /></td>
+                  <td className="px-2 py-1"><input type="number" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.quantity`, { valueAsNumber: true })} /></td>
+                  <td className="px-2 py-1"><input type="number" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.bonus`, { valueAsNumber: true })} /></td>
+                  <td className="px-2 py-1"><input type="number" step="0.01" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.cost_price`, { valueAsNumber: true })} /></td>
+                  <td className="px-2 py-1"><input type="number" step="0.01" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.discount_percent`, { valueAsNumber: true })} /></td>
+                  <td className="px-2 py-1"><input type="number" step="0.01" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.tax_percent`, { valueAsNumber: true })} onKeyDown={(e) => handleKeyDown(e, index)} /></td>
+                  <td className="px-2 py-1 font-medium text-right text-gray-700">{items[index]?.amount?.toFixed(2)}</td>
+                  <td className="px-2 py-1 text-center">
+                    <button type="button" onClick={() => remove(index)} className="text-red-500 hover:bg-red-100 p-1 rounded"><Trash2 className="h-3 w-3" /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {/* Footer Totals */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-gray-200">
-        <div className="col-span-1 md:col-span-2"></div>
-        <div className="col-span-1 md:col-span-2 grid grid-cols-2 gap-y-1 text-xs">
-          <div className="text-gray-500 text-right pr-4">Sub Total:</div>
-          <div className="font-bold text-right">{watch('sub_total').toFixed(2)}</div>
-          
-          <div className="text-gray-500 text-right pr-4">Discount:</div>
-          <div className="font-bold text-right text-red-600">-{watch('total_discount').toFixed(2)}</div>
-          
-          <div className="text-gray-500 text-right pr-4">Tax:</div>
-          <div className="font-bold text-right text-blue-600">+{watch('total_tax').toFixed(2)}</div>
-          
-          <div className="text-gray-900 font-bold text-right pr-4 text-sm pt-2 border-t border-gray-200">Grand Total:</div>
-          <div className="font-bold text-right text-sm pt-2 border-t border-gray-200">${watch('grand_total').toFixed(2)}</div>
-          
-          <div className="text-gray-500 text-right pr-4 self-center">Paid Amount:</div>
-          <div className="text-right">
-             <input 
-                type="number" 
-                step="0.01"
-                className="w-24 text-right border border-gray-300 rounded px-1 text-sm focus:ring-1 focus:ring-blue-500 outline-none" 
-                {...register('paid_amount', { valueAsNumber: true })} 
-             />
+      {/* Footer Totals - Single Row with Fixed Widths */}
+      <div className="mt-4 pt-4 border-t border-gray-200">
+        <div className="flex gap-2 text-xs bg-gray-50 p-3 rounded border overflow-x-auto">
+          <div className="flex items-center gap-1 min-w-[80px]">
+            <span className="text-gray-500">Items:</span>
+            <span className="font-bold text-gray-900">{items.length}</span>
           </div>
-
-          <div className="text-gray-500 text-right pr-4 self-center">Remaining:</div>
-          <div className="font-bold text-right text-orange-600">
-             ${(watch('grand_total') - (watch('paid_amount') || 0)).toFixed(2)}
+          
+          <div className="flex items-center gap-1 min-w-[70px]">
+            <span className="text-gray-500">Qty:</span>
+            <span className="font-bold text-blue-600">{items.reduce((sum, item) => sum + (item.quantity || 0), 0)}</span>
+          </div>
+          
+          {/* Only show bonus if enabled in settings */}
+          {printSettings?.show_bonus && (
+            <div className="flex items-center gap-1 min-w-[80px]">
+              <span className="text-gray-500">Bonus:</span>
+              <span className="font-bold text-green-600">{items.reduce((sum, item) => sum + (item.bonus || 0), 0)}</span>
+            </div>
+          )}
+          
+          <div className="flex items-center gap-1 min-w-[120px]">
+            <span className="text-gray-500">Sub Total:</span>
+            <span className="font-bold text-gray-900">${watch('sub_total').toFixed(2)}</span>
+          </div>
+          
+          <div className="flex items-center gap-1 min-w-[100px]">
+            <span className="text-gray-500">Discount:</span>
+            <span className="font-bold text-red-600">-${watch('total_discount').toFixed(2)}</span>
+          </div>
+          
+          <div className="flex items-center gap-1 min-w-[80px]">
+            <span className="text-gray-500">Tax:</span>
+            <span className="font-bold text-blue-600">+${watch('total_tax').toFixed(2)}</span>
+          </div>
+          
+          <div className="flex items-center gap-1 min-w-[120px]">
+            <span className="text-gray-500">Grand Total:</span>
+            <span className="font-bold text-purple-600">${watch('grand_total').toFixed(2)}</span>
+          </div>
+          
+          <div className="flex items-center gap-1 min-w-[100px]">
+            <span className="text-gray-500">Paid:</span>
+            <input 
+              type="number" 
+              step="0.01"
+              className="w-16 text-xs text-right border border-gray-300 rounded px-1 font-bold text-green-600 focus:ring-1 focus:ring-blue-500 outline-none" 
+              {...register('paid_amount', { valueAsNumber: true })} 
+            />
+          </div>
+          
+          <div className="flex items-center gap-1 min-w-[80px]">
+            <span className="text-gray-500">Due:</span>
+            <span className="font-bold text-orange-600">${(watch('grand_total') - (watch('paid_amount') || 0)).toFixed(2)}</span>
           </div>
         </div>
       </div>
@@ -318,12 +354,15 @@ export const PurchasesPage = () => {
         onOpenChange={setIsModalOpen} 
         title={editingPurchase ? "Edit Purchase Invoice" : "New Purchase Invoice"} 
         size="xl"
+        className="h-[90vh] max-h-[90vh]"
       >
-        <PurchaseForm 
-          initialData={editingPurchase} 
-          onSave={handleSave} 
-          onCancel={() => setIsModalOpen(false)} 
-        />
+        <div className="h-[75vh] flex flex-col">
+          <PurchaseForm 
+            initialData={editingPurchase} 
+            onSave={handleSave} 
+            onCancel={() => setIsModalOpen(false)} 
+          />
+        </div>
       </Modal>
 
       <Modal open={!!viewPurchase} onOpenChange={(o) => !o && setViewPurchase(null)} title="Purchase Details" size="full">

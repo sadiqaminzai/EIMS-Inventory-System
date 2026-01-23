@@ -16,7 +16,6 @@ return new class extends Migration
             $table->decimal('sale_price', 10, 2)->nullable()->after('cost_price');
             $table->string('photo')->nullable()->after('sale_price');
             $table->string('status')->default('active')->after('photo');
-            $table->integer('stock_qty')->default(0)->after('status');
         });
 
         Schema::table('products', function (Blueprint $table) {

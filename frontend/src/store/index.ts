@@ -12,6 +12,7 @@ import { accountApi } from '../api/accounts';
 import { accountTransactionApi } from '../api/accountTransactions';
 import { settingsApi } from '../api/settings';
 import { transactionApi } from '../api/transactions';
+import { paymentApi } from '../api/payments';
 
 // --- Types ---
 
@@ -154,6 +155,8 @@ export interface Sale extends BaseEntity {
   id: string;
   invoice_no: string;
   customer_id: string;
+  supplier_id?: string;
+  invoice_type?: 'sale' | 'purchase' | 'return_in' | 'return_out';
   sale_date: string;
   items: SalesItem[];
   sub_total: number;
@@ -187,6 +190,8 @@ export interface Return extends BaseEntity {
   total_discount: number;
   total_tax: number;
   total_amount: number;
+  net_amount?: number;
+  paid_amount?: number;
 }
 
 export interface Expense extends BaseEntity {
@@ -223,6 +228,26 @@ export interface Transaction extends BaseEntity {
   description?: string;
   payment_method: string;
   attachment?: string;
+}
+
+export interface PaymentDetail {
+  customer_id: string;
+  debit_amount: number;
+  credit_amount: number;
+  balance_amount: number;
+  remarks?: string;
+}
+
+export interface Payment extends BaseEntity {
+  id: string;
+  serial_no?: string;
+  date: string;
+  account_id: string;
+  currency: string;
+  salesman?: string;
+  booker?: string;
+  notes?: string;
+  details: PaymentDetail[];
 }
 
 export interface PrintSettings {
@@ -319,6 +344,9 @@ interface AppState {
   addTransaction: (data: Omit<Transaction, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by'>) => void;
   updateTransaction: (id: string, data: Partial<Transaction>) => void;
   deleteTransaction: (id: string) => void;
+
+  addPayment: (data: Omit<Payment, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by'>) => void;
+  updatePayment: (id: string, data: Omit<Payment, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by'>) => void;
 
   // Permission Check
   hasPermission: (perm: Permission) => boolean;
@@ -522,7 +550,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
   bootstrapData: async () => {
     try {
-      const [tenant, printSettings, brands, countries, products, suppliers, customers, users, _roles, clients, accounts, transactions, purchases, sales, returns] = await Promise.all([
+      const [tenant, printSettings, brands, countries, products, suppliers, customers, users, _roles, clients, accounts, transactions, purchases, sales, returns, returnOuts] = await Promise.all([
         settingsApi.getTenantProfile(),
         settingsApi.getPrintSettings(),
         brandApi.list(),
@@ -538,12 +566,14 @@ export const useStore = create<AppState>((set, get) => ({
         transactionApi.getHistory({ type: 'purchase' }),
         transactionApi.getHistory({ type: 'sale' }),
         transactionApi.getHistory({ type: 'return_in' }),
+        transactionApi.getHistory({ type: 'return_out' }),
       ]);
 
       const productList = Array.isArray(products?.data) ? products.data : (products?.data?.data ?? products?.data ?? products);
       const purchaseOrders = Array.isArray(purchases?.data) ? purchases.data : (purchases?.data?.data ?? purchases?.data ?? purchases);
       const saleOrders = Array.isArray(sales?.data) ? sales.data : (sales?.data?.data ?? sales?.data ?? sales);
       const returnOrders = Array.isArray(returns?.data) ? returns.data : (returns?.data?.data ?? returns?.data ?? returns);
+      const returnOutOrders = Array.isArray(returnOuts?.data) ? returnOuts.data : (returnOuts?.data?.data ?? returnOuts?.data ?? returnOuts);
 
       const userMap = new Map<string, string>();
       users.forEach((u) => {
@@ -552,6 +582,10 @@ export const useStore = create<AppState>((set, get) => ({
       const resolveUser = (id?: number | string | null) => {
         if (!id) return 'System';
         return userMap.get(String(id)) ?? `User #${id}`;
+      };
+      const toDateInput = (value?: string) => {
+        if (!value) return '';
+        return value.slice(0, 10);
       };
       set(() => ({
         tenant: {
@@ -684,62 +718,160 @@ export const useStore = create<AppState>((set, get) => ({
         })),
         purchases: (purchaseOrders || []).map((o: any) => ({
           id: String(o.id),
-          invoice_no: o.reference_number ?? '',
+          invoice_no: o.serial_no ?? o.reference_number ?? '',
           supplier_id: String(o.party_id ?? ''),
-          purchase_date: o.transaction_date ?? '',
+          purchase_date: toDateInput(o.transaction_date ?? ''),
           items: (o.items ?? []).map((i: any) => ({
             product_id: String(i.product_id ?? ''),
             cost_price: Number(i.unit_price ?? 0),
-            batch_no: '',
+            batch_no: String(i.batch_no ?? ''),
             quantity: Number(i.quantity ?? 0),
-            bonus: 0,
+            bonus: Number(i.bonus ?? 0),
             mfg_date: '',
-            exp_date: '',
-            discount: 0,
-            tax: 0,
+            exp_date: i.exp_date ?? '',
+            discount: Number(i.discount ?? 0),
+            discount_percent: Number(i.discount_percent ?? 0),
+            tax: Number(i.tax ?? 0),
+            tax_percent: Number(i.tax_percent ?? 0),
             amount: Number(i.total_price ?? 0),
           })),
           sub_total: Number(o.total_amount ?? 0),
-          total_discount: 0,
-          total_tax: 0,
-          grand_total: Number(o.total_amount ?? 0),
-          paid_amount: 0,
+          total_discount: Number(o.total_discount ?? 0),
+          total_tax: Number(o.total_tax ?? 0),
+            grand_total: Number(o.net_amount ?? o.total_amount ?? 0),
+          paid_amount: Number(o.paid_amount ?? 0),
           created_by: resolveUser(o.created_by),
           updated_by: resolveUser(o.updated_by),
           created_at: o.created_at,
           updated_at: o.updated_at,
         })),
-        sales: (saleOrders || []).map((o: any) => ({
+        sales: [
+          ...(saleOrders || []).map((o: any) => ({
           id: String(o.id),
-          invoice_no: o.reference_number ?? '',
+          invoice_no: o.serial_no ?? o.reference_number ?? '',
           customer_id: String(o.party_id ?? ''),
-          sale_date: o.transaction_date ?? '',
+          supplier_id: '',
+          invoice_type: 'sale' as const,
+          sale_date: toDateInput(o.transaction_date ?? ''),
           items: (o.items ?? []).map((i: any) => ({
             product_id: String(i.product_id ?? ''),
             sale_price: Number(i.unit_price ?? 0),
-            batch_no: '',
+            batch_no: String(i.batch_no ?? ''),
             quantity: Number(i.quantity ?? 0),
-            bonus: 0,
-            exp_date: '',
-            discount: 0,
-            tax: 0,
+            bonus: Number(i.bonus ?? 0),
+            exp_date: i.exp_date ?? '',
+            discount: Number(i.discount ?? 0),
+            discount_percent: Number(i.discount_percent ?? 0),
+            tax: Number(i.tax ?? 0),
+            tax_percent: Number(i.tax_percent ?? 0),
             amount: Number(i.total_price ?? 0),
           })),
           sub_total: Number(o.total_amount ?? 0),
-          total_discount: 0,
-          total_tax: 0,
-          net_payable: Number(o.total_amount ?? 0),
-          paid_amount: 0,
+          total_discount: Number(o.total_discount ?? 0),
+          total_tax: Number(o.total_tax ?? 0),
+          net_payable: Number(o.net_amount ?? o.total_amount ?? 0),
+          paid_amount: Number(o.paid_amount ?? 0),
           created_by: resolveUser(o.created_by),
           updated_by: resolveUser(o.updated_by),
           created_at: o.created_at,
           updated_at: o.updated_at,
         })),
+          ...(purchaseOrders || []).map((o: any) => ({
+            id: String(o.id),
+            invoice_no: o.serial_no ?? o.reference_number ?? '',
+            customer_id: '',
+            supplier_id: String(o.party_id ?? ''),
+            invoice_type: 'purchase' as const,
+             sale_date: toDateInput(o.transaction_date ?? ''),
+            items: (o.items ?? []).map((i: any) => ({
+              product_id: String(i.product_id ?? ''),
+              sale_price: Number(i.unit_price ?? 0),
+              batch_no: String(i.batch_no ?? ''),
+              quantity: Number(i.quantity ?? 0),
+              bonus: Number(i.bonus ?? 0),
+              exp_date: i.exp_date ?? '',
+              discount: Number(i.discount ?? 0),
+              discount_percent: Number(i.discount_percent ?? 0),
+              tax: Number(i.tax ?? 0),
+              tax_percent: Number(i.tax_percent ?? 0),
+              amount: Number(i.total_price ?? 0),
+            })),
+            sub_total: Number(o.total_amount ?? 0),
+            total_discount: Number(o.total_discount ?? 0),
+            total_tax: Number(o.total_tax ?? 0),
+            net_payable: Number(o.net_amount ?? o.total_amount ?? 0),
+            paid_amount: Number(o.paid_amount ?? 0),
+            created_by: resolveUser(o.created_by),
+            updated_by: resolveUser(o.updated_by),
+            created_at: o.created_at,
+            updated_at: o.updated_at,
+          })),
+          ...(returnOrders || []).map((o: any) => ({
+            id: String(o.id),
+            invoice_no: o.serial_no ?? o.reference_number ?? '',
+            customer_id: String(o.party_id ?? ''),
+            supplier_id: '',
+            invoice_type: 'return_in' as const,
+            sale_date: toDateInput(o.transaction_date ?? ''),
+            items: (o.items ?? []).map((i: any) => ({
+              product_id: String(i.product_id ?? ''),
+              sale_price: Number(i.unit_price ?? 0),
+              batch_no: String(i.batch_no ?? ''),
+              quantity: Number(i.quantity ?? 0),
+              bonus: Number(i.bonus ?? 0),
+              exp_date: i.exp_date ?? '',
+              discount: Number(i.discount ?? 0),
+              discount_percent: Number(i.discount_percent ?? 0),
+              tax: Number(i.tax ?? 0),
+              tax_percent: Number(i.tax_percent ?? 0),
+              amount: Number(i.total_price ?? 0),
+            })),
+            sub_total: Number(o.total_amount ?? 0),
+            total_discount: Number(o.total_discount ?? 0),
+            total_tax: Number(o.total_tax ?? 0),
+            net_payable: Number(o.net_amount ?? o.total_amount ?? 0),
+            paid_amount: Number(o.paid_amount ?? 0),
+            created_by: resolveUser(o.created_by),
+            updated_by: resolveUser(o.updated_by),
+            created_at: o.created_at,
+            updated_at: o.updated_at,
+          })),
+          ...(returnOutOrders || []).map((o: any) => ({
+            id: String(o.id),
+            invoice_no: o.serial_no ?? o.reference_number ?? '',
+            customer_id: '',
+            supplier_id: String(o.party_id ?? ''),
+            invoice_type: 'return_out' as const,
+            sale_date: toDateInput(o.transaction_date ?? ''),
+            items: (o.items ?? []).map((i: any) => ({
+              product_id: String(i.product_id ?? ''),
+              sale_price: Number(i.unit_price ?? 0),
+              batch_no: String(i.batch_no ?? ''),
+              quantity: Number(i.quantity ?? 0),
+              bonus: Number(i.bonus ?? 0),
+              exp_date: i.exp_date ?? '',
+              discount: Number(i.discount ?? 0),
+              discount_percent: Number(i.discount_percent ?? 0),
+              tax: Number(i.tax ?? 0),
+              tax_percent: Number(i.tax_percent ?? 0),
+              amount: Number(i.total_price ?? 0),
+            })),
+            sub_total: Number(o.total_amount ?? 0),
+            total_discount: Number(o.total_discount ?? 0),
+            total_tax: Number(o.total_tax ?? 0),
+            net_payable: Number(o.net_amount ?? o.total_amount ?? 0),
+            paid_amount: Number(o.paid_amount ?? 0),
+            created_by: resolveUser(o.created_by),
+            updated_by: resolveUser(o.updated_by),
+            created_at: o.created_at,
+            updated_at: o.updated_at,
+          })),
+        ],
         returns: (returnOrders || []).map((o: any) => ({
           id: String(o.id),
-          invoice_no: o.reference_number ?? '',
+          invoice_no: o.serial_no ?? o.reference_number ?? '',
           customer_id: String(o.party_id ?? ''),
-          return_date: o.transaction_date ?? '',
+          return_date: toDateInput(o.transaction_date ?? ''),
           items: (o.items ?? []).map((i: any) => ({
             product_id: String(i.product_id ?? ''),
             sale_price: Number(i.unit_price ?? 0),
@@ -747,14 +879,16 @@ export const useStore = create<AppState>((set, get) => ({
             quantity: Number(i.quantity ?? 0),
             bonus: 0,
             exp_date: '',
-            discount: 0,
-            tax: 0,
+            discount: Number(i.discount ?? 0),
+            tax: Number(i.tax ?? 0),
             amount: Number(i.total_price ?? 0),
           })),
           sub_total: Number(o.total_amount ?? 0),
-          total_discount: 0,
-          total_tax: 0,
+          total_discount: Number(o.total_discount ?? 0),
+          total_tax: Number(o.total_tax ?? 0),
           total_amount: Number(o.total_amount ?? 0),
+          net_amount: Number(o.net_amount ?? o.total_amount ?? 0),
+          paid_amount: Number(o.paid_amount ?? 0),
           created_by: resolveUser(o.created_by),
           updated_by: resolveUser(o.updated_by),
           created_at: o.created_at,
@@ -1212,9 +1346,17 @@ export const useStore = create<AppState>((set, get) => ({
         items: data.items.map((i) => ({
           product_id: Number(i.product_id),
           quantity: i.quantity,
+          bonus: i.bonus ?? 0,
+          batch_no: i.batch_no ?? null,
+          expiry_date: i.exp_date ?? null,
+          discount: i.discount ?? 0,
+          discount_percent: i.discount_percent ?? 0,
+          tax: i.tax ?? 0,
+          tax_percent: i.tax_percent ?? 0,
           unit_price: i.cost_price,
         })),
         date: data.purchase_date,
+        paid_amount: Number(data.paid_amount ?? 0),
         notes: '',
       });
       toast.success('Purchase recorded successfully');
@@ -1232,9 +1374,17 @@ export const useStore = create<AppState>((set, get) => ({
         items: data.items.map((i) => ({
           product_id: Number(i.product_id),
           quantity: i.quantity,
+          bonus: i.bonus ?? 0,
+          batch_no: i.batch_no ?? null,
+          expiry_date: i.exp_date ?? null,
+          discount: i.discount ?? 0,
+          discount_percent: i.discount_percent ?? 0,
+          tax: i.tax ?? 0,
+          tax_percent: i.tax_percent ?? 0,
           unit_price: i.cost_price,
         })),
         date: data.purchase_date,
+        paid_amount: Number(data.paid_amount ?? 0),
         notes: '',
       });
       toast.info('Purchase updated successfully');
@@ -1256,51 +1406,116 @@ export const useStore = create<AppState>((set, get) => ({
 
   addSale: async (data) => {
     try {
-      await transactionApi.createSale({
-        type: 'sale',
-        party_id: Number(data.customer_id),
+      const invoiceType = data.invoice_type || 'sale';
+      const isSupplier = invoiceType === 'purchase' || invoiceType === 'return_out';
+
+      const request = {
+        type: invoiceType,
+        party_id: Number(isSupplier ? data.supplier_id : data.customer_id),
         items: data.items.map((i) => ({
           product_id: Number(i.product_id),
           quantity: i.quantity,
+          bonus: i.bonus ?? 0,
+          batch_no: i.batch_no ?? null,
+          expiry_date: i.exp_date ?? null,
+          discount: i.discount ?? 0,
+          discount_percent: i.discount_percent ?? 0,
+          tax: i.tax ?? 0,
+          tax_percent: i.tax_percent ?? 0,
           unit_price: i.sale_price,
         })),
         date: data.sale_date,
+        paid_amount: Number(data.paid_amount ?? 0),
         notes: '',
-      });
-      toast.success('Sale recorded successfully');
+      } as const;
+
+      if (invoiceType === 'purchase') {
+        await transactionApi.createPurchase(request);
+        toast.success('Purchase recorded successfully');
+      } else if (invoiceType === 'return_in') {
+        await transactionApi.createReturnIn(request);
+        toast.success('Return recorded successfully');
+      } else if (invoiceType === 'return_out') {
+        await transactionApi.createReturnOut(request);
+        toast.success('Return out recorded successfully');
+      } else {
+        await transactionApi.createSale(request);
+        toast.success('Sale recorded successfully');
+      }
+
       await get().bootstrapData();
     } catch {
-      toast.error('Failed to record sale');
+      toast.error('Failed to record invoice');
     }
   },
 
   updateSale: async (id, data) => {
     try {
-      await transactionApi.updateSale(id, {
-        type: 'sale',
-        party_id: Number(data.customer_id),
+      const invoiceType = data.invoice_type || 'sale';
+      const isSupplier = invoiceType === 'purchase' || invoiceType === 'return_out';
+
+      const request = {
+        type: invoiceType,
+        party_id: Number(isSupplier ? data.supplier_id : data.customer_id),
         items: data.items.map((i) => ({
           product_id: Number(i.product_id),
           quantity: i.quantity,
+          bonus: i.bonus ?? 0,
+          batch_no: i.batch_no ?? null,
+          expiry_date: i.exp_date ?? null,
+          discount: i.discount ?? 0,
+          discount_percent: i.discount_percent ?? 0,
+          tax: i.tax ?? 0,
+          tax_percent: i.tax_percent ?? 0,
           unit_price: i.sale_price,
         })),
         date: data.sale_date,
+        paid_amount: Number(data.paid_amount ?? 0),
         notes: '',
-      });
-      toast.info('Sale updated successfully');
+      } as const;
+
+      if (invoiceType === 'purchase') {
+        await transactionApi.updatePurchase(id, request);
+        toast.info('Purchase updated successfully');
+      } else if (invoiceType === 'return_in') {
+        await transactionApi.updateReturnIn(id, request);
+        toast.info('Return updated successfully');
+      } else if (invoiceType === 'return_out') {
+        await transactionApi.updateReturnOut(id, request);
+        toast.info('Return out updated successfully');
+      } else {
+        await transactionApi.updateSale(id, request);
+        toast.info('Sale updated successfully');
+      }
+
       await get().bootstrapData();
     } catch {
-      toast.error('Failed to update sale');
+      toast.error('Failed to update invoice');
     }
   },
 
   deleteSale: async (id) => {
     try {
-      await transactionApi.deleteSale(id);
-      toast.error('Sale deleted successfully');
+      const existing = get().sales.find((s) => s.id === id);
+      const invoiceType = existing?.invoice_type || 'sale';
+
+      if (invoiceType === 'purchase') {
+        await transactionApi.deletePurchase(id);
+        toast.error('Purchase deleted successfully');
+      } else if (invoiceType === 'return_in') {
+        await transactionApi.deleteReturnIn(id);
+        toast.error('Return deleted successfully');
+      } else if (invoiceType === 'return_out') {
+        await transactionApi.deleteReturnOut(id);
+        toast.error('Return out deleted successfully');
+      } else {
+        await transactionApi.deleteSale(id);
+        toast.error('Sale deleted successfully');
+      }
+
       await get().bootstrapData();
     } catch {
-      toast.error('Failed to delete sale');
+      toast.error('Failed to delete invoice');
     }
   },
 
@@ -1312,9 +1527,17 @@ export const useStore = create<AppState>((set, get) => ({
         items: data.items.map((i) => ({
           product_id: Number(i.product_id),
           quantity: i.quantity,
+          bonus: i.bonus ?? 0,
+          batch_no: i.batch_no ?? null,
+          expiry_date: i.exp_date ?? null,
+          discount: i.discount ?? 0,
+          discount_percent: i.discount_percent ?? 0,
+          tax: i.tax ?? 0,
+          tax_percent: i.tax_percent ?? 0,
           unit_price: i.sale_price,
         })),
         date: data.return_date,
+        paid_amount: Number(data.paid_amount ?? 0),
         notes: '',
       });
       toast.success('Return recorded successfully');
@@ -1332,9 +1555,17 @@ export const useStore = create<AppState>((set, get) => ({
         items: data.items.map((i) => ({
           product_id: Number(i.product_id),
           quantity: i.quantity,
+          bonus: i.bonus ?? 0,
+          batch_no: i.batch_no ?? null,
+          expiry_date: i.exp_date ?? null,
+          discount: i.discount ?? 0,
+          discount_percent: i.discount_percent ?? 0,
+          tax: i.tax ?? 0,
+          tax_percent: i.tax_percent ?? 0,
           unit_price: i.sale_price,
         })),
         date: data.return_date,
+        paid_amount: Number(data.paid_amount ?? 0),
         notes: '',
       });
       toast.info('Return updated successfully');
@@ -1407,6 +1638,54 @@ export const useStore = create<AppState>((set, get) => ({
       await get().bootstrapData();
     } catch {
       toast.error('Failed to add transaction');
+    }
+  },
+
+  addPayment: async (data) => {
+    try {
+      await paymentApi.create({
+        date: data.date,
+        account_id: Number(data.account_id),
+        currency: data.currency,
+        salesman: data.salesman,
+        booker: data.booker,
+        notes: data.notes,
+        details: data.details.map((d) => ({
+          customer_id: Number(d.customer_id),
+          debit_amount: d.debit_amount,
+          credit_amount: d.credit_amount,
+          balance_amount: d.balance_amount,
+          remarks: d.remarks,
+        })),
+      } as any);
+      toast.success('Payment recorded successfully');
+      await get().bootstrapData();
+    } catch {
+      toast.error('Failed to record payment');
+    }
+  },
+
+  updatePayment: async (id, data) => {
+    try {
+      await paymentApi.update(id, {
+        date: data.date,
+        account_id: Number(data.account_id),
+        currency: data.currency,
+        salesman: data.salesman,
+        booker: data.booker,
+        notes: data.notes,
+        details: data.details.map((d) => ({
+          customer_id: Number(d.customer_id),
+          debit_amount: d.debit_amount,
+          credit_amount: d.credit_amount,
+          balance_amount: d.balance_amount,
+          remarks: d.remarks,
+        })),
+      } as any);
+      toast.info('Payment updated successfully');
+      await get().bootstrapData();
+    } catch {
+      toast.error('Failed to update payment');
     }
   },
 

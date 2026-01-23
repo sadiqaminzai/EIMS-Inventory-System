@@ -14,7 +14,7 @@ class InventoryBatch extends Model
         'tenant_id',
         'product_id',
         'supplier_id',
-        'batch_number',
+        'batch_no',
         'cost_price',
         'quantity_initial',
         'quantity_remaining',

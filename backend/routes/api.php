@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\V1\TenantProfileController;
 use App\Http\Controllers\Api\V1\TransactionController;
 use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\PrintSettingsController;
+use App\Http\Controllers\Api\V1\PaymentController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->middleware(['api'])->group(function () {
@@ -95,6 +96,13 @@ Route::prefix('v1')->middleware(['api'])->group(function () {
         Route::put('/account-transactions/{accountTransaction}', [AccountTransactionController::class, 'update'])->middleware('permission:manage_orders');
         Route::delete('/account-transactions/{accountTransaction}', [AccountTransactionController::class, 'destroy'])->middleware('permission:manage_orders');
 
+        Route::get('/payments', [PaymentController::class, 'index'])->middleware('permission:manage_orders');
+        Route::get('/payments/{payment}', [PaymentController::class, 'show'])->middleware('permission:manage_orders');
+        Route::get('/payments/serial/{serial}', [PaymentController::class, 'showBySerial'])->middleware('permission:manage_orders');
+        Route::post('/payments', [PaymentController::class, 'store'])->middleware('permission:manage_orders');
+        Route::put('/payments/{payment}', [PaymentController::class, 'update'])->middleware('permission:manage_orders');
+        Route::delete('/payments/{payment}', [PaymentController::class, 'destroy'])->middleware('permission:manage_orders');
+
         Route::post('/transactions/purchase', [TransactionController::class, 'purchase'])
             ->middleware('permission:manage_inventory');
         Route::put('/transactions/purchase/{order}', [TransactionController::class, 'updatePurchase'])
@@ -112,6 +120,12 @@ Route::prefix('v1')->middleware(['api'])->group(function () {
         Route::put('/transactions/return-in/{order}', [TransactionController::class, 'updateReturnIn'])
             ->middleware('permission:manage_orders');
         Route::delete('/transactions/return-in/{order}', [TransactionController::class, 'deleteReturnIn'])
+            ->middleware('permission:manage_orders');
+        Route::post('/transactions/return-out', [TransactionController::class, 'returnOut'])
+            ->middleware('permission:manage_orders');
+        Route::put('/transactions/return-out/{order}', [TransactionController::class, 'updateReturnOut'])
+            ->middleware('permission:manage_orders');
+        Route::delete('/transactions/return-out/{order}', [TransactionController::class, 'deleteReturnOut'])
             ->middleware('permission:manage_orders');
         Route::get('/transactions', [TransactionController::class, 'history'])
             ->middleware('permission:manage_orders');

@@ -12,6 +12,7 @@ class Account extends Model
 
     protected $fillable = [
         'tenant_id',
+        'serial_no',
         'name',
         'type',
         'currency',

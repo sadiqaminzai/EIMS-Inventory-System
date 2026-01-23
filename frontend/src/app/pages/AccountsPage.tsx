@@ -1,17 +1,19 @@
 import { useState, useEffect } from 'react';
-import { useStore, Account, Transaction } from '../../store';
+import { useStore, Account, Transaction, Payment } from '../../store';
 import { Button } from '../components/ui/button';
 import { DenseTable } from '../components/ui/DenseTable';
 import { DenseInput, DenseSelect } from '../components/ui/Form';
 import { Modal } from '../components/ui/Modal';
 import { useForm, Controller } from 'react-hook-form';
-import { Plus, Wallet, ArrowRightLeft, ArrowUpRight, ArrowDownLeft, Building2, Smartphone, Banknote, Paperclip, Scan, Calendar, Filter, Save, X } from 'lucide-react';
+import { Plus, Wallet, ArrowRightLeft, ArrowUpRight, ArrowDownLeft, Building2, Smartphone, Banknote, Paperclip, Scan, Calendar, Filter, Save, X, Printer } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns';
 import { ActionButtons } from '../components/ui/ActionButtons';
 import { ConfirmationDialog } from '../components/ui/ConfirmationDialog';
 import { Combobox } from '../components/ui/Combobox';
 import { TransactionForm } from '../components/forms/TransactionForm';
+import { ImageWithFallback } from '../components/figma/ImageWithFallback';
+import { paymentApi } from '../../api/payments';
 
 // --- Account Form ---
 const AccountForm = ({ initialData, onSave, onCancel }: { initialData?: Account, onSave: (data: any) => void, onCancel: () => void }) => {
@@ -233,11 +235,270 @@ const TransactionDetails = ({ transaction, accounts, customers }: { transaction:
     );
 };
 
+const PaymentDetails = ({ payment, tenant, accounts, customers, onClose }: { payment: Payment, tenant: any, accounts: Account[], customers: any[], onClose: () => void }) => {
+    const account = accounts.find(a => a.id === payment.account_id);
+
+    const formatDate = (value?: string | null) => value ? format(new Date(value), 'PPP') : '-';
+    const formatDateTime = (value?: string | null) => value ? format(new Date(value), 'yyyy-MM-dd hh:mm a') : '-';
+
+    const totalPaid = (payment.details || []).reduce((sum, d) => sum + Number(d.credit_amount || 0), 0);
+    const totalDue = (payment.details || []).reduce((sum, d) => sum + Number(d.debit_amount || 0), 0);
+    const totalBalance = (payment.details || []).reduce((sum, d) => sum + Number(d.balance_amount || 0), 0);
+    const currencySymbol = payment.currency === 'AFN' ? '؋' : '$';
+
+    return (
+                <div className="flex flex-col h-full bg-gray-100">
+                        <style>
+                                {`
+                                @media print {
+                                    @page { size: A4; margin: 8mm; }
+                          body * { visibility: hidden !important; }
+                          .payment-print-only, .payment-print-only * { visibility: visible !important; }
+                          .payment-print-only {
+                            position: fixed !important;
+                            top: 0;
+                            left: 0;
+                            width: 210mm !important;
+                            min-height: 297mm !important;
+                            background: white !important;
+                          }
+                                    .payment-print {
+                                        width: calc(210mm - 16mm) !important;
+                                        min-height: calc(297mm - 16mm) !important;
+                                        margin: 0 auto !important;
+                                        box-shadow: none !important;
+                                        transform: none !important;
+                                        position: relative !important;
+                                    }
+                                    .payment-scroll {
+                                        overflow: visible !important;
+                                        height: auto !important;
+                                    }
+                                }
+                                `}
+                        </style>
+
+                    <div className="payment-print-only">
+                        <div className="payment-print bg-white w-full min-h-[297mm]">
+                            <div className="p-6 flex flex-col min-h-[297mm]">
+                                <div className="flex items-start justify-between gap-6">
+                                    <div className="flex items-center gap-4">
+                                        {tenant?.logo ? (
+                                            <div className="h-16 w-16 rounded-md overflow-hidden border border-gray-200 bg-gray-50">
+                                                <ImageWithFallback src={tenant.logo} alt={tenant?.name || 'Owner'} className="h-full w-full object-cover" />
+                                            </div>
+                                        ) : null}
+                                        <div>
+                                            <div className="text-xl font-bold text-gray-900">{tenant?.name || 'Owner'}</div>
+                                            <div className="text-xs text-gray-500 space-y-0.5">
+                                                <div>{tenant?.address || '-'}</div>
+                                                <div>{tenant?.phone || '-'} {tenant?.email ? `| ${tenant.email}` : ''}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="text-right pr-2">
+                                        <div className="text-[20px] font-bold text-blue-600 leading-tight">PAYMENT RECEIPT</div>
+                                        <div className="text-xs text-gray-500">Serial: {payment.serial_no || payment.id}</div>
+                                        <div className="text-xs text-gray-500">Date: {formatDate(payment.date)}</div>
+                                        <div className="text-xs text-gray-500">Printed: {formatDateTime(new Date().toISOString())}</div>
+                                    </div>
+                                </div>
+
+                                <div className="border rounded-lg overflow-hidden mt-4">
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-gray-50 text-gray-600">
+                                            <tr>
+                                                <th className="px-3 py-2 text-left w-12">S.No</th>
+                                                <th className="px-3 py-2 text-left">Customer</th>
+                                                <th className="px-3 py-2 text-right w-28">Due</th>
+                                                <th className="px-3 py-2 text-right w-28">Paid</th>
+                                                <th className="px-3 py-2 text-right w-28">Balance</th>
+                                                <th className="px-3 py-2 text-left">Remarks</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y">
+                                            {(payment.details || []).map((d, idx) => {
+                                                const customer = customers.find((c) => String(c.id) === String(d.customer_id));
+                                                return (
+                                                    <tr key={`print-${d.customer_id}-${idx}`}>
+                                                        <td className="px-3 py-2">{idx + 1}</td>
+                                                        <td className="px-3 py-2">{customer?.name || '-'}</td>
+                                                        <td className="px-3 py-2 text-right">{Number(d.debit_amount || 0).toFixed(2)}</td>
+                                                        <td className="px-3 py-2 text-right">{Number(d.credit_amount || 0).toFixed(2)}</td>
+                                                        <td className="px-3 py-2 text-right">{Number(d.balance_amount || 0).toFixed(2)}</td>
+                                                        <td className="px-3 py-2">{d.remarks || '-'}</td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                    <div className="flex items-center justify-end gap-6 px-3 py-2 border-t bg-gray-50 text-xs text-gray-700">
+                                        <div><span className="font-semibold">Total Due:</span> {currencySymbol} {totalDue.toFixed(2)}</div>
+                                        <div><span className="font-semibold">Total Paid:</span> {currencySymbol} {totalPaid.toFixed(2)}</div>
+                                        <div><span className="font-semibold">Total Balance:</span> {currencySymbol} {totalBalance.toFixed(2)}</div>
+                                    </div>
+                                </div>
+
+                                <div className="mt-auto pt-6 pb-12">
+                                    {payment.notes?.trim() ? (
+                                        <div className="border rounded-lg p-4">
+                                            <div className="text-xs text-gray-500">Notes</div>
+                                            <div className="text-sm">{payment.notes}</div>
+                                        </div>
+                                    ) : null}
+
+                                    <div className="grid grid-cols-3 gap-8 pt-8">
+                                        <div className="border-t border-gray-300 pt-2 text-xs">
+                                            Salesman Signature
+                                            <div className="text-[11px] text-gray-500 mt-1">{payment.salesman || '-'}</div>
+                                        </div>
+                                        <div />
+                                        <div className="border-t border-gray-300 pt-2 text-xs">
+                                            Booker Signature
+                                            <div className="text-[11px] text-gray-500 mt-1">{payment.booker || '-'}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="payment-footer text-xs text-gray-500 mt-4">
+                                        <div className="grid grid-cols-3 gap-4">
+                                            <div>Printed: {formatDateTime(new Date().toISOString())}</div>
+                                            <div>Created: {formatDateTime(payment.created_at)}</div>
+                                            <div>Updated: {formatDateTime(payment.updated_at)}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                        <div className="payment-scroll flex-1 overflow-auto flex justify-center p-0">
+                                <div className="payment-print bg-white shadow-lg h-fit w-full max-w-[210mm] min-h-[297mm] scale-[0.97] origin-top my-4 print:m-0 print:p-0 print:h-auto print:scale-100 print:shadow-none print:z-[9999]">
+                    <div className="p-6 flex flex-col min-h-[297mm]">
+                        <div className="flex items-start justify-between gap-6">
+                            <div className="flex items-center gap-4">
+                                {tenant?.logo ? (
+                                    <div className="h-16 w-16 rounded-md overflow-hidden border border-gray-200 bg-gray-50">
+                                        <ImageWithFallback src={tenant.logo} alt={tenant?.name || 'Owner'} className="h-full w-full object-cover" />
+                                    </div>
+                                ) : null}
+                                <div>
+                                    <div className="text-xl font-bold text-gray-900">{tenant?.name || 'Owner'}</div>
+                                    <div className="text-xs text-gray-500 space-y-0.5">
+                                        <div>{tenant?.address || '-'}</div>
+                                        <div>{tenant?.phone || '-'} {tenant?.email ? `| ${tenant.email}` : ''}</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="text-right pr-2">
+                                <div className="text-[20px] font-bold text-blue-600 leading-tight">PAYMENT RECEIPT</div>
+                                <div className="text-xs text-gray-500">Serial: {payment.serial_no || payment.id}</div>
+                                <div className="text-xs text-gray-500">Date: {formatDate(payment.date)}</div>
+                                <div className="text-xs text-gray-500">Printed: {formatDateTime(new Date().toISOString())}</div>
+                            </div>
+                        </div>
+
+                        <div className="border rounded-lg overflow-hidden">
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50 text-gray-600">
+                                    <tr>
+                                        <th className="px-3 py-2 text-left w-12">S.No</th>
+                                        <th className="px-3 py-2 text-left">Customer</th>
+                                        <th className="px-3 py-2 text-right w-28">Due</th>
+                                        <th className="px-3 py-2 text-right w-28">Paid</th>
+                                        <th className="px-3 py-2 text-right w-28">Balance</th>
+                                        <th className="px-3 py-2 text-left">Remarks</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                    {(payment.details || []).map((d, idx) => {
+                                        const customer = customers.find((c) => String(c.id) === String(d.customer_id));
+                                        return (
+                                            <tr key={`${d.customer_id}-${idx}`}>
+                                                <td className="px-3 py-2">{idx + 1}</td>
+                                                <td className="px-3 py-2">{customer?.name || '-'}</td>
+                                                <td className="px-3 py-2 text-right">{Number(d.debit_amount || 0).toFixed(2)}</td>
+                                                <td className="px-3 py-2 text-right">{Number(d.credit_amount || 0).toFixed(2)}</td>
+                                                <td className="px-3 py-2 text-right">{Number(d.balance_amount || 0).toFixed(2)}</td>
+                                                <td className="px-3 py-2">{d.remarks || '-'}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                            <div className="flex items-center justify-end gap-6 px-3 py-2 border-t bg-gray-50 text-xs text-gray-700">
+                                <div><span className="font-semibold">Total Due:</span> {currencySymbol} {totalDue.toFixed(2)}</div>
+                                <div><span className="font-semibold">Total Paid:</span> {currencySymbol} {totalPaid.toFixed(2)}</div>
+                                <div><span className="font-semibold">Total Balance:</span> {currencySymbol} {totalBalance.toFixed(2)}</div>
+                            </div>
+                        </div>
+
+                        <div className="mt-auto pt-6 pb-12">
+                            {payment.notes?.trim() ? (
+                                <div className="border rounded-lg p-4">
+                                    <div className="text-xs text-gray-500">Notes</div>
+                                    <div className="text-sm">{payment.notes}</div>
+                                </div>
+                            ) : null}
+
+                            <div className="grid grid-cols-3 gap-8 pt-8">
+                                <div className="border-t border-gray-300 pt-2 text-xs">
+                                    Salesman Signature
+                                    <div className="text-[11px] text-gray-500 mt-1">{payment.salesman || '-'}</div>
+                                </div>
+                                <div />
+                                <div className="border-t border-gray-300 pt-2 text-xs">
+                                    Booker Signature
+                                    <div className="text-[11px] text-gray-500 mt-1">{payment.booker || '-'}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="payment-footer text-xs text-gray-500 mt-4">
+                            <div className="grid grid-cols-3 gap-4">
+                                <div>Printed: {formatDateTime(new Date().toISOString())}</div>
+                                <div>Created: {formatDateTime(payment.created_at)}</div>
+                                <div>Updated: {formatDateTime(payment.updated_at)}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="flex items-center justify-between p-4 border-t border-gray-200 bg-white gap-4 shrink-0 z-10 print:hidden">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-gray-500">
+                    <div>
+                        <span className="block font-semibold">Created By</span>
+                        {payment.created_by || 'System'}
+                    </div>
+                    <div>
+                        <span className="block font-semibold">Created At</span>
+                        {formatDateTime(payment.created_at)}
+                    </div>
+                    <div>
+                        <span className="block font-semibold">Updated By</span>
+                        {payment.updated_by || 'System'}
+                    </div>
+                    <div>
+                        <span className="block font-semibold">Updated At</span>
+                        {formatDateTime(payment.updated_at)}
+                    </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                    <Button variant="secondary" onClick={onClose}>Close</Button>
+                    <Button onClick={() => window.print()}>
+                        <Printer className="mr-2 h-4 w-4" />
+                        Print
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export const AccountsPage = () => {
     // Attempt to destructure updateTransaction. If it's missing in store type but present in runtime, this works.
     // If missing in runtime, we'll handle it carefully.
     const store = useStore();
-    const { accounts, transactions, addAccount, updateAccount, deleteAccount, addTransaction, deleteTransaction, hasPermission, customers } = store;
+    const { accounts, transactions, addAccount, updateAccount, deleteAccount, addTransaction, addPayment, updatePayment, deleteTransaction, hasPermission, customers, tenant } = store;
     
     // Fallback for updateTransaction if it doesn't exist in store
     const updateTransaction = (store as any).updateTransaction || ((id: string, data: any) => {
@@ -258,6 +519,30 @@ export const AccountsPage = () => {
     const [isViewTransactionModalOpen, setIsViewTransactionModalOpen] = useState(false);
     const [editingTransaction, setEditingTransaction] = useState<Transaction | undefined>(undefined);
     const [viewingTransaction, setViewingTransaction] = useState<Transaction | undefined>(undefined);
+    const [editingPayment, setEditingPayment] = useState<Payment | undefined>(undefined);
+    const [viewingPayment, setViewingPayment] = useState<Payment | undefined>(undefined);
+        const handleViewTransaction = async (item: Transaction) => {
+            if (item.type === 'Income' && item.reference_id) {
+                try {
+                    const payment = await paymentApi.getBySerial(item.reference_id);
+                    setViewingPayment(payment as any);
+                    return;
+                } catch {
+                    if (!Number.isNaN(Number(item.reference_id))) {
+                        try {
+                            const payment = await paymentApi.get(Number(item.reference_id));
+                            setViewingPayment(payment as any);
+                            return;
+                        } catch {
+                            // fall through to transaction view
+                        }
+                    }
+                }
+            }
+
+            setViewingTransaction(item);
+            setIsViewTransactionModalOpen(true);
+        };
     
     // Deletion
     const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -268,6 +553,31 @@ export const AccountsPage = () => {
         start: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
         end: format(endOfMonth(new Date()), 'yyyy-MM-dd')
     });
+
+    const handleEditTransaction = async (item: Transaction) => {
+        setEditingTransaction(item);
+        setEditingPayment(undefined);
+
+        if (item.type === 'Income' && item.reference_id) {
+            try {
+                const payment = await paymentApi.getBySerial(item.reference_id);
+                setEditingPayment(payment as any);
+            } catch {
+                if (!Number.isNaN(Number(item.reference_id))) {
+                    try {
+                        const payment = await paymentApi.get(Number(item.reference_id));
+                        setEditingPayment(payment as any);
+                    } catch {
+                        setEditingPayment(undefined);
+                    }
+                } else {
+                    setEditingPayment(undefined);
+                }
+            }
+        }
+
+        setIsTransactionModalOpen(true);
+    };
 
     if (!hasPermission('account.view')) return <div>Access Denied</div>;
 
@@ -383,6 +693,12 @@ export const AccountsPage = () => {
         };
     });
 
+    const sortedTransactions = [...enrichedTransactions].sort((a, b) => {
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : new Date(a.date).getTime();
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : new Date(b.date).getTime();
+        return bTime - aTime;
+    });
+
     const transactionColumns = [
         { 
             header: 'Date', 
@@ -457,8 +773,8 @@ export const AccountsPage = () => {
             width: '100px',
             cell: (item: Transaction) => (
                 <ActionButtons 
-                    onView={() => { setViewingTransaction(item); setIsViewTransactionModalOpen(true); }}
-                    onEdit={hasPermission('account.edit') ? () => { setEditingTransaction(item); setIsTransactionModalOpen(true); } : undefined}
+                    onView={() => { handleViewTransaction(item); }}
+                    onEdit={hasPermission('account.edit') ? () => { handleEditTransaction(item); } : undefined}
                     onDelete={hasPermission('account.delete') ? () => { setDeleteId(item.id); setDeleteType('transaction'); } : undefined}
                 />
             )
@@ -564,11 +880,11 @@ export const AccountsPage = () => {
                 />
             ) : (
                 <DenseTable 
-                    data={enrichedTransactions} 
+                    data={sortedTransactions} 
                     columns={transactionColumns as any} 
                     title="Transactions"
                     hideHeader
-                    defaultSort={{ key: 'date', direction: 'desc' }}
+                    defaultSort={{ key: 'created_at', direction: 'desc' }}
                 />
             )}
 
@@ -601,14 +917,31 @@ export const AccountsPage = () => {
             {/* Transaction Modal */}
             <Modal
                 open={isTransactionModalOpen}
-                onOpenChange={setIsTransactionModalOpen}
+                onOpenChange={(open) => {
+                    setIsTransactionModalOpen(open);
+                    if (!open) {
+                        setEditingTransaction(undefined);
+                        setEditingPayment(undefined);
+                    }
+                }}
                 title={editingTransaction ? "Edit Transaction" : "New Transaction"}
+                size="xl"
             >
                 <TransactionForm 
-                    initialData={editingTransaction} 
+                    initialData={editingPayment ? undefined : editingTransaction}
+                    paymentData={editingPayment}
                     onSave={(data) => {
-                        if (editingTransaction) updateTransaction(editingTransaction.id, data);
-                        else addTransaction(data);
+                        if (data?.kind === 'payment') {
+                            if (data?.payment_id) {
+                                updatePayment(String(data.payment_id), data);
+                            } else {
+                                addPayment(data);
+                            }
+                        } else if (editingTransaction) {
+                            updateTransaction(editingTransaction.id, data);
+                        } else {
+                            addTransaction(data);
+                        }
                         setIsTransactionModalOpen(false);
                     }} 
                     onCancel={() => setIsTransactionModalOpen(false)} 
@@ -622,6 +955,25 @@ export const AccountsPage = () => {
                 title="Transaction Details"
             >
                 {viewingTransaction && <TransactionDetails transaction={viewingTransaction} accounts={accounts} customers={customers} />}
+            </Modal>
+
+            <Modal
+                open={!!viewingPayment}
+                onOpenChange={(open) => {
+                    if (!open) setViewingPayment(undefined);
+                }}
+                title="Payment Receipt"
+                size="full"
+            >
+                {viewingPayment && (
+                    <PaymentDetails
+                        payment={viewingPayment}
+                        tenant={tenant}
+                        accounts={accounts}
+                        customers={customers}
+                        onClose={() => setViewingPayment(undefined)}
+                    />
+                )}
             </Modal>
 
             {/* Delete Confirmation */}

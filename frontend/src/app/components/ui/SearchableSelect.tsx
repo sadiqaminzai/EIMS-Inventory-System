@@ -5,9 +5,7 @@ import { Button } from "@/app/components/ui/button"
 import {
   Command,
   CommandEmpty,
-  CommandGroup,
   CommandInput,
-  CommandItem,
   CommandList,
 } from "@/app/components/ui/command"
 import {
@@ -17,8 +15,8 @@ import {
 } from "@/app/components/ui/popover"
 
 export interface SearchableSelectProps {
-  options: { value: string; label: string; disabled?: boolean }[]
-  value?: string
+  options: { value: string | number; label: string; disabled?: boolean }[]
+  value?: string | number
   onChange: (value: string) => void
   placeholder?: string
   label?: string
@@ -26,6 +24,7 @@ export interface SearchableSelectProps {
   className?: string
   modal?: boolean
   width?: string | number
+  triggerId?: string
 }
 
 export function SearchableSelect({
@@ -37,14 +36,35 @@ export function SearchableSelect({
   error,
   className,
   modal = false,
-  width = "200px"
+  width = "200px",
+  triggerId
 }: SearchableSelectProps) {
   const [open, setOpen] = React.useState(false)
+  const [search, setSearch] = React.useState("")
+  const [activeIndex, setActiveIndex] = React.useState(0)
 
   // Find label for current value
   const selectedLabel = React.useMemo(() => {
-    return options.find((option) => option.value === value)?.label
+    const current = value === undefined || value === null ? '' : String(value)
+    return options.find((option) => String(option.value) === current)?.label
   }, [options, value])
+
+  const hasValue = value !== undefined && value !== null && String(value) !== ''
+  const displayLabel = hasValue ? (selectedLabel ?? String(value)) : placeholder
+
+  const filteredOptions = React.useMemo(() => {
+    const term = search.trim().toLowerCase()
+    if (!term) return options
+    return options.filter((option) => option.label.toLowerCase().includes(term))
+  }, [options, search])
+
+  React.useEffect(() => {
+    const count = filteredOptions.length
+    const nextIndex = count === 0 ? -1 : Math.min(activeIndex, count - 1)
+    if (nextIndex !== activeIndex) {
+      setActiveIndex(nextIndex)
+    }
+  }, [filteredOptions.length, activeIndex])
 
   return (
     <div className={cn("flex flex-col gap-0.5", className)}>
@@ -55,14 +75,16 @@ export function SearchableSelect({
             variant="outline"
             role="combobox"
             aria-expanded={open}
+            type="button"
+            id={triggerId}
             className={cn(
               "w-full justify-between h-7 text-xs px-2 font-normal border-gray-300 hover:bg-white focus:ring-1 focus:ring-blue-500 bg-white",
-              !value && "text-muted-foreground",
+              !hasValue && "text-muted-foreground",
               error && "border-red-500 focus:ring-red-500"
             )}
           >
             <span className="truncate">
-              {value ? selectedLabel : placeholder}
+              {displayLabel}
             </span>
             <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
           </Button>
@@ -72,32 +94,77 @@ export function SearchableSelect({
           align="start" 
           style={{ width: width }}
         >
-          <Command>
-            <CommandInput placeholder={`Search...`} className="h-8 text-xs" />
+          <Command shouldFilter={false}>
+            <CommandInput
+              placeholder={`Search...`}
+              className="h-8 text-xs"
+              value={search}
+              onValueChange={setSearch}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  if (filteredOptions.length === 0) return;
+                  setActiveIndex((prev) => {
+                    const next = prev < 0 ? 0 : (prev + 1) % filteredOptions.length;
+                    return next;
+                  });
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  if (filteredOptions.length === 0) return;
+                  setActiveIndex((prev) => {
+                    if (prev <= 0) return filteredOptions.length - 1;
+                    return prev - 1;
+                  });
+                  return;
+                }
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (filteredOptions.length === 0) return;
+                  const active = filteredOptions[Math.max(activeIndex, 0)];
+                  if (active && !active.disabled) {
+                    onChange(String(active.value))
+                    setOpen(false)
+                  }
+                }
+              }}
+            />
             <CommandList>
-                <CommandEmpty>No results found.</CommandEmpty>
-                <CommandGroup>
-                {options.map((option) => (
-                    <CommandItem
-                    key={option.value}
-                    value={option.label}
-                    onSelect={() => {
-                        onChange(option.value)
-                        setOpen(false)
-                    }}
-                    disabled={option.disabled}
-                    className="text-xs"
-                    >
-                    <Check
+                {filteredOptions.length === 0 ? (
+                  <CommandEmpty>No results found.</CommandEmpty>
+                ) : (
+                  <div className="p-1">
+                    {filteredOptions.map((option, idx) => (
+                      <div
+                        key={String(option.value)}
+                        role="option"
+                        aria-selected={hasValue && String(value) === String(option.value)}
                         className={cn(
-                        "mr-2 h-3 w-3",
-                        value === option.value ? "opacity-100" : "opacity-0"
+                          "relative flex select-none items-center rounded-sm px-2 py-1.5 text-xs outline-none",
+                          option.disabled ? "pointer-events-none opacity-50" : "cursor-pointer hover:bg-slate-100",
+                          idx === activeIndex && "bg-slate-100",
+                          hasValue && String(value) === String(option.value) && "bg-slate-100"
                         )}
-                    />
-                    {option.label}
-                    </CommandItem>
-                ))}
-                </CommandGroup>
+                        onMouseEnter={() => setActiveIndex(idx)}
+                        onMouseDown={(e) => {
+                          if (option.disabled) return;
+                          e.preventDefault();
+                          onChange(String(option.value));
+                          setOpen(false);
+                        }}
+                      >
+                        <Check
+                          className={cn(
+                            "mr-2 h-3 w-3",
+                            hasValue && String(value) === String(option.value) ? "opacity-100" : "opacity-0"
+                          )}
+                        />
+                        {option.label}
+                      </div>
+                    ))}
+                  </div>
+                )}
             </CommandList>
           </Command>
         </PopoverContent>

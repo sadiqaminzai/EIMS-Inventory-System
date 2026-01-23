@@ -2,6 +2,7 @@ import apiClient from './client';
 
 export interface AccountDto {
   id: number;
+  serial_no?: string;
   name: string;
   type: string;
   currency: string;

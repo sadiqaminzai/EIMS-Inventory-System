@@ -23,7 +23,7 @@ export interface Product {
 
 export interface InventoryBatch {
   id: number;
-  batch_number: string;
+  batch_no: string | null;
   quantity_remaining: number;
   expiry_date: string | null;
   received_date: string;

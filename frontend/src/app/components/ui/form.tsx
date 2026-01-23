@@ -41,13 +41,16 @@ interface DenseSelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   label?: string;
   error?: string;
   options: { value: string | number; label: string }[];
+  labelPosition?: 'top' | 'right';
 }
 
 export const DenseSelect = forwardRef<HTMLSelectElement, DenseSelectProps>(
-  ({ label, error, options, className, ...props }, ref) => {
+  ({ label, error, options, className, labelPosition = 'top', ...props }, ref) => {
     return (
-      <div className="flex flex-col gap-0.5">
-        {label && <label className="text-[10px] font-semibold uppercase text-gray-500">{label}</label>}
+      <div className={clsx("flex gap-0.5", labelPosition === 'right' ? "flex-row items-center" : "flex-col")}>        
+        {labelPosition !== 'right' && label && (
+          <label className="text-[10px] font-semibold uppercase text-gray-500">{label}</label>
+        )}
         <select
           ref={ref}
           className={clsx(
@@ -64,6 +67,9 @@ export const DenseSelect = forwardRef<HTMLSelectElement, DenseSelectProps>(
             </option>
           ))}
         </select>
+        {labelPosition === 'right' && label && (
+          <label className="text-[10px] font-semibold uppercase text-gray-500">{label}</label>
+        )}
         {error && <span className="text-[10px] text-red-500">{error}</span>}
       </div>
     );

@@ -16,7 +16,7 @@ class ProductController extends Controller
     public function index(Request $request)
     {
         $query = Product::query()
-            ->select('products.*', DB::raw('COALESCE(view_product_stock.current_stock, products.stock_qty) as current_stock'))
+            ->select('products.*', DB::raw('COALESCE(view_product_stock.current_stock, 0) as current_stock'))
             ->leftJoin('view_product_stock', function ($join) {
                 $join->on('view_product_stock.product_id', '=', 'products.id')
                     ->on('view_product_stock.tenant_id', '=', 'products.tenant_id');
@@ -62,7 +62,6 @@ class ProductController extends Controller
             'cost_price' => ['nullable', 'numeric'],
             'sale_price' => ['nullable', 'numeric'],
             'status' => ['nullable', 'string'],
-            'stock_qty' => ['nullable', 'integer'],
             'is_active' => ['nullable', 'boolean'],
         ]);
 
@@ -99,7 +98,6 @@ class ProductController extends Controller
             'cost_price' => ['nullable', 'numeric'],
             'sale_price' => ['nullable', 'numeric'],
             'status' => ['nullable', 'string'],
-            'stock_qty' => ['nullable', 'integer'],
             'is_active' => ['nullable', 'boolean'],
         ]);
 
@@ -128,6 +126,8 @@ class ProductController extends Controller
     {
         $batches = InventoryBatch::query()
             ->where('product_id', $product->id)
+            ->where('quantity_remaining', '>', 0)
+            ->orderByRaw('batch_no IS NULL DESC')
             ->orderBy('received_date')
             ->get();
 
@@ -147,7 +147,7 @@ class ProductController extends Controller
             'brand_id' => $product->brand_id,
             'country_id' => $product->country_id,
             'status' => $product->status ?? ($product->is_active ? 'active' : 'inactive'),
-            'stock_qty' => (int) ($product->current_stock ?? $product->stock_qty ?? 0),
+            'stock_qty' => (int) ($product->current_stock ?? 0),
             'created_by' => $product->created_by,
             'updated_by' => $product->updated_by,
             'created_at' => $product->created_at,

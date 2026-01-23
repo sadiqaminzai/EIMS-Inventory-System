@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Account;
+use App\Support\ModuleSequenceService;
 use Illuminate\Http\Request;
 
 class AccountController extends Controller
@@ -24,7 +25,10 @@ class AccountController extends Controller
             'status' => ['nullable', 'string'],
         ]);
 
+        $serial = app(ModuleSequenceService::class)->next('account');
+
         $account = Account::create(array_merge($data, [
+            'serial_no' => (string) $serial,
             'created_by' => $request->user()->id,
             'updated_by' => $request->user()->id,
         ]));

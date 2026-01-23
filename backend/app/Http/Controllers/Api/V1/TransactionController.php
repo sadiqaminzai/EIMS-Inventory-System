@@ -13,6 +13,7 @@ use App\Models\Supplier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use App\Support\ModuleSequenceService;
 use Illuminate\Validation\ValidationException;
 
 class TransactionController extends Controller
@@ -84,6 +85,7 @@ class TransactionController extends Controller
         DB::transaction(function () use ($order) {
             $orderItems = $order->items()->get();
             $orderItemIds = $orderItems->pluck('id');
+            $productIds = $orderItems->pluck('product_id')->unique();
 
             $batchIds = InventoryLog::whereIn('order_item_id', $orderItemIds)
                 ->pluck('batch_id')
@@ -103,6 +105,10 @@ class TransactionController extends Controller
             InventoryBatch::whereIn('id', $batchIds)->delete();
             OrderItem::whereIn('id', $orderItemIds)->delete();
             $order->delete();
+
+            foreach ($productIds as $productId) {
+                $this->syncProductStock($productId);
+            }
         });
 
         return response()->json(['message' => 'Deleted']);
@@ -114,9 +120,10 @@ class TransactionController extends Controller
         $customer = Customer::findOrFail($data['party_id']);
 
         $order = DB::transaction(function () use ($data, $customer, $request) {
+            $serialNo = $this->getNextSerialNo('sale');
             $order = Order::create([
                 'transaction_type' => 'sale',
-                'reference_number' => (string) Str::uuid(),
+                'serial_no' => $serialNo,
                 'user_id' => $request->user()->id,
                 'party_type' => Customer::class,
                 'party_id' => $customer->id,
@@ -128,13 +135,11 @@ class TransactionController extends Controller
                 'updated_by' => $request->user()->id,
             ]);
 
-            $this->assignReferenceNumber($order);
-
             $total = 0;
 
             foreach ($data['items'] as $item) {
                 $product = Product::findOrFail($item['product_id']);
-                $requestedQty = $item['quantity'];
+                $requestedQty = $item['quantity'] + ($item['bonus'] ?? 0);
 
                 $batches = InventoryBatch::query()
                     ->where('product_id', $product->id)
@@ -153,9 +158,16 @@ class TransactionController extends Controller
                 $orderItem = OrderItem::create([
                     'order_id' => $order->id,
                     'product_id' => $product->id,
-                    'quantity' => $requestedQty,
+                    'batch_no' => $item['batch_no'] ?? null,
+                    'exp_date' => $item['expiry_date'] ?? null,
+                    'quantity' => $item['quantity'],
+                    'bonus' => $item['bonus'] ?? 0,
+                    'discount' => $item['discount'] ?? 0,
+                    'discount_percent' => $item['discount_percent'] ?? 0,
+                    'tax' => $item['tax'] ?? 0,
+                    'tax_percent' => $item['tax_percent'] ?? 0,
                     'unit_price' => $item['unit_price'],
-                    'total_price' => $requestedQty * $item['unit_price'],
+                    'total_price' => $item['quantity'] * $item['unit_price'],
                     'created_at' => now(),
                     'created_by' => $request->user()->id,
                     'updated_by' => $request->user()->id,
@@ -191,10 +203,13 @@ class TransactionController extends Controller
                     $remaining -= $deduct;
                 }
 
+                $this->syncProductStock($product->id);
+
                 $total += $orderItem->total_price;
             }
 
-            $order->update(['total_amount' => $total]);
+            $totals = $this->calculateTotals($data['items'], (float) ($data['paid_amount'] ?? 0));
+            $order->update($totals);
 
             return $order;
         });
@@ -227,7 +242,7 @@ class TransactionController extends Controller
 
             foreach ($data['items'] as $item) {
                 $product = Product::findOrFail($item['product_id']);
-                $requestedQty = $item['quantity'];
+                $requestedQty = $item['quantity'] + ($item['bonus'] ?? 0);
 
                 $batches = InventoryBatch::query()
                     ->where('product_id', $product->id)
@@ -246,9 +261,16 @@ class TransactionController extends Controller
                 $orderItem = OrderItem::create([
                     'order_id' => $order->id,
                     'product_id' => $product->id,
-                    'quantity' => $requestedQty,
+                    'batch_no' => $item['batch_no'] ?? null,
+                    'exp_date' => $item['expiry_date'] ?? null,
+                    'quantity' => $item['quantity'],
+                    'bonus' => $item['bonus'] ?? 0,
+                    'discount' => $item['discount'] ?? 0,
+                    'discount_percent' => $item['discount_percent'] ?? 0,
+                    'tax' => $item['tax'] ?? 0,
+                    'tax_percent' => $item['tax_percent'] ?? 0,
                     'unit_price' => $item['unit_price'],
-                    'total_price' => $requestedQty * $item['unit_price'],
+                    'total_price' => $item['quantity'] * $item['unit_price'],
                     'created_at' => now(),
                     'created_by' => $request->user()->id,
                     'updated_by' => $request->user()->id,
@@ -284,10 +306,13 @@ class TransactionController extends Controller
                     $remaining -= $deduct;
                 }
 
+                $this->syncProductStock($product->id);
+
                 $total += $orderItem->total_price;
             }
 
-            $order->update(['total_amount' => $total, 'updated_by' => $request->user()->id]);
+            $totals = $this->calculateTotals($data['items'], (float) ($data['paid_amount'] ?? 0));
+            $order->update(array_merge($totals, ['updated_by' => $request->user()->id]));
 
             return $order;
         });
@@ -315,9 +340,10 @@ class TransactionController extends Controller
         $customer = Customer::findOrFail($data['party_id']);
 
         $order = DB::transaction(function () use ($data, $customer, $request) {
+            $serialNo = $this->getNextSerialNo('return_in');
             $order = Order::create([
                 'transaction_type' => 'return_in',
-                'reference_number' => (string) Str::uuid(),
+                'serial_no' => $serialNo,
                 'user_id' => $request->user()->id,
                 'party_type' => Customer::class,
                 'party_id' => $customer->id,
@@ -329,18 +355,24 @@ class TransactionController extends Controller
                 'updated_by' => $request->user()->id,
             ]);
 
-            $this->assignReferenceNumber($order);
-
             $total = 0;
 
             foreach ($data['items'] as $item) {
                 $product = Product::findOrFail($item['product_id']);
                 $totalPrice = $item['quantity'] * $item['unit_price'];
+                $qtyWithBonus = $item['quantity'] + ($item['bonus'] ?? 0);
 
                 $orderItem = OrderItem::create([
                     'order_id' => $order->id,
                     'product_id' => $product->id,
+                    'batch_no' => $item['batch_no'] ?? null,
+                    'exp_date' => $item['expiry_date'] ?? null,
                     'quantity' => $item['quantity'],
+                    'bonus' => $item['bonus'] ?? 0,
+                    'discount' => $item['discount'] ?? 0,
+                    'discount_percent' => $item['discount_percent'] ?? 0,
+                    'tax' => $item['tax'] ?? 0,
+                    'tax_percent' => $item['tax_percent'] ?? 0,
                     'unit_price' => $item['unit_price'],
                     'total_price' => $totalPrice,
                     'created_at' => now(),
@@ -348,18 +380,7 @@ class TransactionController extends Controller
                     'updated_by' => $request->user()->id,
                 ]);
 
-                $batch = InventoryBatch::create([
-                    'product_id' => $product->id,
-                    'supplier_id' => null,
-                    'batch_number' => $this->generateBatchNumber(),
-                    'cost_price' => $item['unit_price'],
-                    'quantity_initial' => $item['quantity'],
-                    'quantity_remaining' => $item['quantity'],
-                    'received_date' => $data['date'],
-                    'expiry_date' => $item['expiry_date'] ?? null,
-                    'created_by' => $request->user()->id,
-                    'updated_by' => $request->user()->id,
-                ]);
+                $batch = $this->upsertInventoryBatch($product, $item, $data['date'], $request, $qtyWithBonus, null);
 
                 $runningBalance = InventoryBatch::where('product_id', $product->id)
                     ->sum('quantity_remaining');
@@ -368,17 +389,123 @@ class TransactionController extends Controller
                     'transaction_type' => 'in',
                     'order_item_id' => $orderItem->id,
                     'batch_id' => $batch->id,
-                    'quantity_change' => $item['quantity'],
+                    'quantity_change' => $qtyWithBonus,
                     'running_balance' => $runningBalance,
                     'created_at' => now(),
                     'created_by' => $request->user()->id,
                     'updated_by' => $request->user()->id,
                 ]);
 
+                $this->syncProductStock($product->id);
+
                 $total += $totalPrice;
             }
 
-            $order->update(['total_amount' => $total]);
+            $totals = $this->calculateTotals($data['items'], (float) ($data['paid_amount'] ?? 0));
+            $order->update($totals);
+
+            return $order;
+        });
+
+        return response()->json($order->load('items'), 201);
+    }
+
+    public function returnOut(Request $request)
+    {
+        $data = $this->validateOrder($request);
+        $supplier = Supplier::findOrFail($data['party_id']);
+
+        $order = DB::transaction(function () use ($data, $supplier, $request) {
+            $serialNo = $this->getNextSerialNo('return_out');
+            $order = Order::create([
+                'transaction_type' => 'return_out',
+                'serial_no' => $serialNo,
+                'user_id' => $request->user()->id,
+                'party_type' => Supplier::class,
+                'party_id' => $supplier->id,
+                'status' => 'completed',
+                'total_amount' => 0,
+                'notes' => $data['notes'] ?? null,
+                'transaction_date' => $data['date'],
+                'created_by' => $request->user()->id,
+                'updated_by' => $request->user()->id,
+            ]);
+
+            $total = 0;
+
+            foreach ($data['items'] as $item) {
+                $product = Product::findOrFail($item['product_id']);
+                $requestedQty = $item['quantity'] + ($item['bonus'] ?? 0);
+
+                $batches = InventoryBatch::query()
+                    ->where('product_id', $product->id)
+                    ->where('quantity_remaining', '>', 0)
+                    ->orderBy('received_date')
+                    ->lockForUpdate()
+                    ->get();
+
+                $availableQty = $batches->sum('quantity_remaining');
+                if ($availableQty < $requestedQty) {
+                    throw ValidationException::withMessages([
+                        'stock' => ['Insufficient stock for product: '.$product->name],
+                    ]);
+                }
+
+                $orderItem = OrderItem::create([
+                    'order_id' => $order->id,
+                    'product_id' => $product->id,
+                    'batch_no' => $item['batch_no'] ?? null,
+                    'exp_date' => $item['expiry_date'] ?? null,
+                    'quantity' => $item['quantity'],
+                    'bonus' => $item['bonus'] ?? 0,
+                    'discount' => $item['discount'] ?? 0,
+                    'discount_percent' => $item['discount_percent'] ?? 0,
+                    'tax' => $item['tax'] ?? 0,
+                    'tax_percent' => $item['tax_percent'] ?? 0,
+                    'unit_price' => $item['unit_price'],
+                    'total_price' => $item['quantity'] * $item['unit_price'],
+                    'created_at' => now(),
+                    'created_by' => $request->user()->id,
+                    'updated_by' => $request->user()->id,
+                ]);
+
+                $remaining = $requestedQty;
+
+                foreach ($batches as $batch) {
+                    if ($remaining <= 0) {
+                        break;
+                    }
+
+                    $deduct = min($batch->quantity_remaining, $remaining);
+                    $batch->update([
+                        'quantity_remaining' => $batch->quantity_remaining - $deduct,
+                        'updated_by' => $request->user()->id,
+                    ]);
+
+                    $runningBalance = InventoryBatch::where('product_id', $product->id)
+                        ->sum('quantity_remaining');
+
+                    InventoryLog::create([
+                        'transaction_type' => 'out',
+                        'order_item_id' => $orderItem->id,
+                        'batch_id' => $batch->id,
+                        'quantity_change' => -$deduct,
+                        'running_balance' => $runningBalance,
+                        'created_at' => now(),
+                        'created_by' => $request->user()->id,
+                        'updated_by' => $request->user()->id,
+                    ]);
+
+                    $remaining -= $deduct;
+                }
+
+                $this->syncProductStock($product->id);
+
+                $total += $orderItem->total_price;
+            }
+
+            $totals = $this->calculateTotals($data['items'], (float) ($data['paid_amount'] ?? 0));
+            $order->update($totals);
 
             return $order;
         });
@@ -412,11 +539,19 @@ class TransactionController extends Controller
             foreach ($data['items'] as $item) {
                 $product = Product::findOrFail($item['product_id']);
                 $totalPrice = $item['quantity'] * $item['unit_price'];
+                $qtyWithBonus = $item['quantity'] + ($item['bonus'] ?? 0);
 
                 $orderItem = OrderItem::create([
                     'order_id' => $order->id,
                     'product_id' => $product->id,
+                    'batch_no' => $item['batch_no'] ?? null,
+                    'exp_date' => $item['expiry_date'] ?? null,
                     'quantity' => $item['quantity'],
+                    'bonus' => $item['bonus'] ?? 0,
+                    'discount' => $item['discount'] ?? 0,
+                    'discount_percent' => $item['discount_percent'] ?? 0,
+                    'tax' => $item['tax'] ?? 0,
+                    'tax_percent' => $item['tax_percent'] ?? 0,
                     'unit_price' => $item['unit_price'],
                     'total_price' => $totalPrice,
                     'created_at' => now(),
@@ -424,18 +559,7 @@ class TransactionController extends Controller
                     'updated_by' => $request->user()->id,
                 ]);
 
-                $batch = InventoryBatch::create([
-                    'product_id' => $product->id,
-                    'supplier_id' => null,
-                    'batch_number' => $this->generateBatchNumber(),
-                    'cost_price' => $item['unit_price'],
-                    'quantity_initial' => $item['quantity'],
-                    'quantity_remaining' => $item['quantity'],
-                    'received_date' => $data['date'],
-                    'expiry_date' => $item['expiry_date'] ?? null,
-                    'created_by' => $request->user()->id,
-                    'updated_by' => $request->user()->id,
-                ]);
+                $batch = $this->upsertInventoryBatch($product, $item, $data['date'], $request, $qtyWithBonus);
 
                 $runningBalance = InventoryBatch::where('product_id', $product->id)
                     ->sum('quantity_remaining');
@@ -444,17 +568,123 @@ class TransactionController extends Controller
                     'transaction_type' => 'in',
                     'order_item_id' => $orderItem->id,
                     'batch_id' => $batch->id,
-                    'quantity_change' => $item['quantity'],
+                    'quantity_change' => $qtyWithBonus,
                     'running_balance' => $runningBalance,
                     'created_at' => now(),
                     'created_by' => $request->user()->id,
                     'updated_by' => $request->user()->id,
                 ]);
 
+                $this->syncProductStock($product->id);
+
                 $total += $totalPrice;
             }
 
-            $order->update(['total_amount' => $total, 'updated_by' => $request->user()->id]);
+            $totals = $this->calculateTotals($data['items'], (float) ($data['paid_amount'] ?? 0));
+            $order->update(array_merge($totals, ['updated_by' => $request->user()->id]));
+
+            return $order;
+        });
+
+        return response()->json($updated->load('items'));
+    }
+
+    public function updateReturnOut(Request $request, Order $order)
+    {
+        if ($order->transaction_type !== 'return_out') {
+            return response()->json(['message' => 'Invalid order type'], 422);
+        }
+
+        $data = $this->validateOrder($request);
+        $supplier = Supplier::findOrFail($data['party_id']);
+
+        $updated = DB::transaction(function () use ($order, $data, $supplier, $request) {
+            $this->restoreSaleInventory($order, $request);
+
+            $order->update([
+                'party_id' => $supplier->id,
+                'party_type' => Supplier::class,
+                'transaction_date' => $data['date'],
+                'notes' => $data['notes'] ?? null,
+                'total_amount' => 0,
+                'updated_by' => $request->user()->id,
+            ]);
+
+            $total = 0;
+
+            foreach ($data['items'] as $item) {
+                $product = Product::findOrFail($item['product_id']);
+                $requestedQty = $item['quantity'] + ($item['bonus'] ?? 0);
+
+                $batches = InventoryBatch::query()
+                    ->where('product_id', $product->id)
+                    ->where('quantity_remaining', '>', 0)
+                    ->orderBy('received_date')
+                    ->lockForUpdate()
+                    ->get();
+
+                $availableQty = $batches->sum('quantity_remaining');
+                if ($availableQty < $requestedQty) {
+                    throw ValidationException::withMessages([
+                        'stock' => ['Insufficient stock for product: '.$product->name],
+                    ]);
+                }
+
+                $orderItem = OrderItem::create([
+                    'order_id' => $order->id,
+                    'product_id' => $product->id,
+                    'batch_no' => $item['batch_no'] ?? null,
+                    'exp_date' => $item['expiry_date'] ?? null,
+                    'quantity' => $item['quantity'],
+                    'bonus' => $item['bonus'] ?? 0,
+                    'discount' => $item['discount'] ?? 0,
+                    'discount_percent' => $item['discount_percent'] ?? 0,
+                    'tax' => $item['tax'] ?? 0,
+                    'tax_percent' => $item['tax_percent'] ?? 0,
+                    'unit_price' => $item['unit_price'],
+                    'total_price' => $item['quantity'] * $item['unit_price'],
+                    'created_at' => now(),
+                    'created_by' => $request->user()->id,
+                    'updated_by' => $request->user()->id,
+                ]);
+
+                $remaining = $requestedQty;
+
+                foreach ($batches as $batch) {
+                    if ($remaining <= 0) {
+                        break;
+                    }
+
+                    $deduct = min($batch->quantity_remaining, $remaining);
+                    $batch->update([
+                        'quantity_remaining' => $batch->quantity_remaining - $deduct,
+                        'updated_by' => $request->user()->id,
+                    ]);
+
+                    $runningBalance = InventoryBatch::where('product_id', $product->id)
+                        ->sum('quantity_remaining');
+
+                    InventoryLog::create([
+                        'transaction_type' => 'out',
+                        'order_item_id' => $orderItem->id,
+                        'batch_id' => $batch->id,
+                        'quantity_change' => -$deduct,
+                        'running_balance' => $runningBalance,
+                        'created_at' => now(),
+                        'created_by' => $request->user()->id,
+                        'updated_by' => $request->user()->id,
+                    ]);
+
+                    $remaining -= $deduct;
+                }
+
+                $this->syncProductStock($product->id);
+
+                $total += $orderItem->total_price;
+            }
+
+            $totals = $this->calculateTotals($data['items'], (float) ($data['paid_amount'] ?? 0));
+            $order->update(array_merge($totals, ['updated_by' => $request->user()->id]));
 
             return $order;
         });
@@ -470,6 +700,20 @@ class TransactionController extends Controller
 
         DB::transaction(function () use ($order) {
             $this->deleteReturnBatches($order);
+            $order->delete();
+        });
+
+        return response()->json(['message' => 'Deleted']);
+    }
+
+    public function deleteReturnOut(Request $request, Order $order)
+    {
+        if ($order->transaction_type !== 'return_out') {
+            return response()->json(['message' => 'Invalid order type'], 422);
+        }
+
+        DB::transaction(function () use ($order, $request) {
+            $this->restoreSaleInventory($order, $request);
             $order->delete();
         });
 
@@ -494,18 +738,100 @@ class TransactionController extends Controller
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', 'integer'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
+            'items.*.bonus' => ['nullable', 'integer', 'min:0'],
             'items.*.unit_price' => ['required', 'numeric', 'min:0'],
+            'items.*.batch_no' => ['nullable', 'string'],
             'items.*.expiry_date' => ['nullable', 'date'],
+            'items.*.discount' => ['nullable', 'numeric', 'min:0'],
+            'items.*.discount_percent' => ['nullable', 'numeric', 'min:0'],
+            'items.*.tax' => ['nullable', 'numeric', 'min:0'],
+            'items.*.tax_percent' => ['nullable', 'numeric', 'min:0'],
+            'paid_amount' => ['nullable', 'numeric', 'min:0'],
             'date' => ['required', 'date'],
             'notes' => ['nullable', 'string'],
         ]);
     }
 
+    protected function calculateTotals(array $items, float $paidAmount): array
+    {
+        $totalAmount = 0;
+        $totalDiscount = 0;
+        $totalTax = 0;
+
+        foreach ($items as $item) {
+            $qty = $item['quantity'] ?? 0;
+            $price = $item['unit_price'] ?? 0;
+            $totalAmount += $qty * $price;
+            $totalDiscount += $item['discount'] ?? 0;
+            $totalTax += $item['tax'] ?? 0;
+        }
+
+        $netAmount = $totalAmount - $totalDiscount + $totalTax;
+        $dueAmount = $netAmount - $paidAmount;
+
+        return [
+            'total_amount' => $totalAmount,
+            'total_discount' => $totalDiscount,
+            'total_tax' => $totalTax,
+            'net_amount' => $netAmount,
+            'paid_amount' => $paidAmount,
+            'due_amount' => $dueAmount,
+        ];
+    }
+
+    protected function upsertInventoryBatch(Product $product, array $item, string $date, Request $request, int $qtyWithBonus, ?int $supplierId = null): InventoryBatch
+    {
+        $batchNo = $item['batch_no'] ?? null;
+        $expiryDate = $item['expiry_date'] ?? null;
+
+        if ($batchNo !== null && $batchNo !== '') {
+            $query = InventoryBatch::query()
+                ->where('product_id', $product->id)
+                ->where('batch_no', $batchNo)
+                ->lockForUpdate();
+
+            if ($expiryDate) {
+                $query->whereDate('expiry_date', $expiryDate);
+            }
+
+            $existing = $query->first();
+
+            if ($existing) {
+                $existing->update([
+                    'quantity_initial' => $existing->quantity_initial + $qtyWithBonus,
+                    'quantity_remaining' => $existing->quantity_remaining + $qtyWithBonus,
+                    'cost_price' => $item['unit_price'],
+                    'received_date' => $date,
+                    'expiry_date' => $expiryDate ?? $existing->expiry_date,
+                    'supplier_id' => $supplierId ?? $existing->supplier_id,
+                    'updated_by' => $request->user()->id,
+                ]);
+
+                return $existing;
+            }
+        }
+
+        return InventoryBatch::create([
+            'product_id' => $product->id,
+            'supplier_id' => $supplierId,
+            'batch_no' => $batchNo ?: null,
+            'cost_price' => $item['unit_price'],
+            'quantity_initial' => $qtyWithBonus,
+            'quantity_remaining' => $qtyWithBonus,
+            'received_date' => $date,
+            'expiry_date' => $expiryDate,
+            'created_by' => $request->user()->id,
+            'updated_by' => $request->user()->id,
+        ]);
+    }
+
     protected function createPurchaseOrder(array $data, Supplier $supplier, Request $request, ?Order $order = null): Order
     {
+        $serialNo = $order ? $order->serial_no : $this->getNextSerialNo('purchase');
+
         $order = $order ?? Order::create([
             'transaction_type' => 'purchase',
-            'reference_number' => (string) Str::uuid(),
+            'serial_no' => $serialNo,
             'user_id' => $request->user()->id,
             'party_type' => Supplier::class,
             'party_id' => $supplier->id,
@@ -517,18 +843,24 @@ class TransactionController extends Controller
             'updated_by' => $request->user()->id,
         ]);
 
-        $this->assignReferenceNumber($order);
-
         $total = 0;
 
         foreach ($data['items'] as $item) {
             $product = Product::findOrFail($item['product_id']);
             $totalPrice = $item['quantity'] * $item['unit_price'];
+            $qtyWithBonus = $item['quantity'] + ($item['bonus'] ?? 0);
 
             $orderItem = OrderItem::create([
                 'order_id' => $order->id,
                 'product_id' => $product->id,
+                'batch_no' => $item['batch_no'] ?? null,
+                'exp_date' => $item['expiry_date'] ?? null,
                 'quantity' => $item['quantity'],
+                'bonus' => $item['bonus'] ?? 0,
+                'discount' => $item['discount'] ?? 0,
+                'discount_percent' => $item['discount_percent'] ?? 0,
+                'tax' => $item['tax'] ?? 0,
+                'tax_percent' => $item['tax_percent'] ?? 0,
                 'unit_price' => $item['unit_price'],
                 'total_price' => $totalPrice,
                 'created_at' => now(),
@@ -536,18 +868,7 @@ class TransactionController extends Controller
                 'updated_by' => $request->user()->id,
             ]);
 
-            $batch = InventoryBatch::create([
-                'product_id' => $product->id,
-                'supplier_id' => $supplier->id,
-                'batch_number' => $this->generateBatchNumber(),
-                'cost_price' => $item['unit_price'],
-                'quantity_initial' => $item['quantity'],
-                'quantity_remaining' => $item['quantity'],
-                'received_date' => $data['date'],
-                'expiry_date' => $item['expiry_date'] ?? null,
-                'created_by' => $request->user()->id,
-                'updated_by' => $request->user()->id,
-            ]);
+            $batch = $this->upsertInventoryBatch($product, $item, $data['date'], $request, $qtyWithBonus, $supplier->id);
 
             $runningBalance = InventoryBatch::where('product_id', $product->id)
                 ->sum('quantity_remaining');
@@ -556,7 +877,7 @@ class TransactionController extends Controller
                 'transaction_type' => 'in',
                 'order_item_id' => $orderItem->id,
                 'batch_id' => $batch->id,
-                'quantity_change' => $item['quantity'],
+                'quantity_change' => $qtyWithBonus,
                 'running_balance' => $runningBalance,
                 'created_at' => now(),
                 'created_by' => $request->user()->id,
@@ -566,10 +887,11 @@ class TransactionController extends Controller
             $total += $totalPrice;
         }
 
-        $order->update([
-            'total_amount' => $total,
+        $totals = $this->calculateTotals($data['items'], (float) ($data['paid_amount'] ?? 0));
+
+        $order->update(array_merge($totals, [
             'updated_by' => $request->user()->id,
-        ]);
+        ]));
 
         return $order;
     }
@@ -578,6 +900,7 @@ class TransactionController extends Controller
     {
         $orderItems = $order->items()->get();
         $orderItemIds = $orderItems->pluck('id');
+        $productIds = $orderItems->pluck('product_id')->unique();
 
         foreach ($orderItems as $item) {
             $logs = InventoryLog::where('order_item_id', $item->id)->get();
@@ -596,12 +919,17 @@ class TransactionController extends Controller
         }
 
         OrderItem::whereIn('id', $orderItemIds)->delete();
+
+        foreach ($productIds as $productId) {
+            $this->syncProductStock($productId);
+        }
     }
 
     protected function deleteReturnBatches(Order $order): void
     {
         $orderItems = $order->items()->get();
         $orderItemIds = $orderItems->pluck('id');
+        $productIds = $orderItems->pluck('product_id')->unique();
 
         $batchIds = InventoryLog::whereIn('order_item_id', $orderItemIds)
             ->pluck('batch_id')
@@ -611,38 +939,37 @@ class TransactionController extends Controller
             ->whereColumn('quantity_remaining', '<', 'quantity_initial')
             ->exists();
 
-        if ($hasUsage) {
-            throw ValidationException::withMessages([
-                'return' => ['Cannot edit/delete this return because stock has been used.'],
-            ]);
+        InventoryLog::whereIn('order_item_id', $orderItemIds)->delete();
+
+        if (! $hasUsage) {
+            InventoryBatch::whereIn('id', $batchIds)->delete();
         }
 
-        InventoryLog::whereIn('order_item_id', $orderItemIds)->delete();
-        InventoryBatch::whereIn('id', $batchIds)->delete();
         OrderItem::whereIn('id', $orderItemIds)->delete();
+
+        foreach ($productIds as $productId) {
+            $this->syncProductStock($productId);
+        }
     }
 
-    protected function assignReferenceNumber(Order $order): void
+    protected function syncProductStock(int $productId): void
     {
-        $prefix = match ($order->transaction_type) {
-            'purchase' => 'P',
-            'sale' => 'S',
-            'return_in' => 'R',
-            default => 'T',
+        return;
+    }
+
+    protected function getNextSerialNo(string $transactionType): string
+    {
+        $module = match ($transactionType) {
+            'sale' => 'trx_S',
+            'purchase' => 'trx_P',
+            'return_in' => 'trx_R',
+            'return_out' => 'trx_O',
+            default => throw new \InvalidArgumentException('Unsupported transaction type.'),
         };
-        $expected = $prefix.'-'.$order->id;
 
-        if ($order->reference_number === $expected) {
-            return;
-        }
+        $next = app(ModuleSequenceService::class)->next($module);
 
-        if (preg_match('/^[PSR]-\d+$/', (string) $order->reference_number)) {
-            return;
-        }
-
-        $order->forceFill([
-            'reference_number' => $expected,
-        ])->save();
+        return (string) $next;
     }
 
     protected function generateBatchNumber(): string

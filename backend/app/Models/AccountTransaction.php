@@ -12,6 +12,7 @@ class AccountTransaction extends Model
 
     protected $fillable = [
         'tenant_id',
+        'serial_no',
         'account_id',
         'to_account_id',
         'type',

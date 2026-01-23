@@ -4,8 +4,8 @@ import { Sale, Purchase, Return } from '../../../store';
 
 interface PrintHandlerProps {
   data: Sale | Purchase | Return;
-  type: 'sale' | 'purchase' | 'return';
-  onAfterPrint: () => void;
+  type: 'sale' | 'purchase' | 'return' | 'return_in' | 'return_out';
+  onAfterPrint?: () => void;
 }
 
 export const PrintHandler = ({ data, type, onAfterPrint }: PrintHandlerProps) => {

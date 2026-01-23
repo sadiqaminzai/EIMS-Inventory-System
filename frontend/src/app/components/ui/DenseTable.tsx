@@ -22,6 +22,7 @@ interface DenseTableProps<T> {
   addLabel?: string;
   canAdd?: boolean;
   defaultSort?: { key: keyof T; direction: 'asc' | 'desc' };
+  headerAfterSearch?: React.ReactNode;
 }
 
 export const DenseTable = <T extends object>({
@@ -32,7 +33,8 @@ export const DenseTable = <T extends object>({
   onAdd,
   addLabel = "Add New",
   canAdd = false,
-  defaultSort
+  defaultSort,
+  headerAfterSearch
 }: DenseTableProps<T>) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -132,6 +134,7 @@ export const DenseTable = <T extends object>({
               }}
             />
           </div>
+          {headerAfterSearch}
         </div>
         <div className="flex items-center gap-2 self-end md:self-auto">
           <button onClick={exportToExcel} className="p-1.5 text-green-700 hover:bg-green-50 rounded" title="Export Excel">

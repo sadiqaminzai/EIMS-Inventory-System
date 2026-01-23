@@ -27,7 +27,6 @@ class Product extends Model
         'cost_price',
         'sale_price',
         'status',
-        'stock_qty',
         'is_active',
         'created_by',
         'updated_by',

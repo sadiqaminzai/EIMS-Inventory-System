@@ -3,17 +3,18 @@ import { useStore, Sale, Purchase, Return } from '../../../store';
 import { format } from 'date-fns';
 
 interface InvoiceTemplateProps {
-  data: Sale | Purchase | Return | null;
-  type: 'sale' | 'purchase' | 'return';
-  id?: string;
+    data: Sale | Purchase | Return | null;
+    type: 'sale' | 'purchase' | 'return' | 'return_in' | 'return_out';
+    id?: string;
 }
 
 export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(({ data, type, id = 'invoice-template-container' }, ref) => {
   const { tenant, printSettings, customers, suppliers, products, currentUser } = useStore();
 
-  const isSale = type === 'sale';
-  const isPurchase = type === 'purchase';
-  const isReturn = type === 'return';
+    const isSale = type === 'sale';
+    const isPurchase = type === 'purchase';
+    const isReturn = type === 'return' || type === 'return_in';
+    const isReturnOut = type === 'return_out';
 
   if (!data) {
      return (
@@ -26,9 +27,9 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
   // --- Helpers ---
 
   const getParty = () => {
-    if (isSale) return customers.find(c => c.id === (data as Sale).customer_id);
-    if (isReturn) return customers.find(c => c.id === (data as Return).customer_id);
-    if (isPurchase) return suppliers.find(s => s.id === (data as Purchase).supplier_id);
+        if (isSale) return customers.find(c => c.id === (data as Sale).customer_id);
+        if (isReturn) return customers.find(c => c.id === (data as Return).customer_id);
+        if (isPurchase || isReturnOut) return suppliers.find(s => s.id === (data as Purchase).supplier_id);
     return null;
   };
 
@@ -36,8 +37,8 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
 
   const getDate = () => {
       if (isSale) return (data as Sale).sale_date;
-      if (isPurchase) return (data as Purchase).purchase_date;
-      if (isReturn) return (data as Return).return_date;
+      if (isPurchase) return (data as any).purchase_date || (data as any).sale_date;
+      if (isReturn || isReturnOut) return (data as Return).return_date || (data as any).sale_date;
       return '';
   };
 
@@ -63,32 +64,43 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
   const itemsCount = data.items.length;
   const totalQty = data.items.reduce((acc, item) => acc + item.quantity + (item.bonus || 0), 0);
   
-  let totalDiscount = 0;
-  let totalTax = 0;
-  let grandTotal = 0;
-  let paidAmount = 0;
+    let totalDiscount = 0;
+    let totalTax = 0;
+    let grandTotal = 0;
+    let paidAmount = 0;
+    let totalAmount = 0;
 
-  if (isPurchase) {
+  const hasPurchaseTotals = isPurchase && 'grand_total' in (data as any);
+
+  if (hasPurchaseTotals) {
       const p = data as Purchase;
       totalDiscount = p.total_discount;
       totalTax = p.total_tax;
+      totalAmount = p.sub_total;
       grandTotal = p.grand_total;
       paidAmount = p.paid_amount || 0;
-  } else if (isSale) {
+  } else if (isSale || isReturnOut || isPurchase) {
       const s = data as Sale;
       totalDiscount = s.total_discount;
       totalTax = s.total_tax;
+      totalAmount = s.sub_total;
       grandTotal = s.net_payable;
       paidAmount = s.paid_amount || 0;
   } else if (isReturn) {
       const r = data as Return;
+      const fallbackTotal = (data as any).net_payable ?? r.sub_total ?? 0;
       totalDiscount = r.total_discount || 0; 
       totalTax = r.total_tax || 0;
-      grandTotal = r.total_amount;
-      paidAmount = 0;
+      totalAmount = r.sub_total ?? 0;
+      grandTotal = r.net_amount ?? r.total_amount ?? fallbackTotal;
+      paidAmount = r.paid_amount ?? 0;
   }
 
-  const remainingAmount = grandTotal - paidAmount;
+    const fallbackTotalAmount = totalAmount || data.items.reduce((acc, item) => acc + (item.quantity * (('cost_price' in item || isPurchase || isReturnOut) ? ((item as any).cost_price ?? (item as any).sale_price ?? 0) : (item as any).sale_price ?? 0)), 0);
+    const fallbackTotalDiscount = totalDiscount || data.items.reduce((acc, item) => acc + ((item as any).discount ?? 0), 0);
+    const fallbackTotalTax = totalTax || data.items.reduce((acc, item) => acc + ((item as any).tax ?? 0), 0);
+    const fallbackNetAmount = (grandTotal || (fallbackTotalAmount - fallbackTotalDiscount + fallbackTotalTax));
+    const remainingAmount = fallbackNetAmount - paidAmount;
 
   const renderFooter = () => (
     <div className="border-t-2 border-gray-800 bg-gray-50 p-4 flex justify-between items-start text-xs break-inside-avoid print:bg-gray-50">
@@ -102,19 +114,23 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                 <span className="font-bold text-gray-900 text-sm">{totalQty}</span>
             </div>
             <div className="flex flex-col items-center">
+                <span className="text-[9px] font-medium text-gray-500 uppercase tracking-wider mb-1">Total</span>
+                <span className="font-bold text-gray-900 text-sm">{fallbackTotalAmount.toFixed(2)}</span>
+            </div>
+            <div className="flex flex-col items-center">
                 <span className="text-[9px] font-medium text-gray-500 uppercase tracking-wider mb-1">Discount</span>
-                <span className="font-bold text-red-600 text-sm">-{totalDiscount.toFixed(2)}</span>
+                <span className="font-bold text-red-600 text-sm">-{fallbackTotalDiscount.toFixed(2)}</span>
             </div>
             <div className="flex flex-col items-center">
                 <span className="text-[9px] font-medium text-gray-500 uppercase tracking-wider mb-1">Tax</span>
-                <span className="font-bold text-blue-600 text-sm">+{totalTax.toFixed(2)}</span>
+                <span className="font-bold text-blue-600 text-sm">+{fallbackTotalTax.toFixed(2)}</span>
             </div>
         </div>
         
         <div className="flex flex-col items-end gap-1">
             <div className="flex gap-4 items-center justify-end w-48">
-                <span className="font-bold text-gray-600 uppercase text-[10px]">Total:</span>
-                <span className="font-bold text-gray-900 text-base">{grandTotal.toFixed(2)}</span>
+                <span className="font-bold text-gray-600 uppercase text-[10px]">Net:</span>
+                <span className="font-bold text-gray-900 text-base">{fallbackNetAmount.toFixed(2)}</span>
             </div>
             <div className="flex gap-4 items-center justify-end w-48">
                 <span className="font-bold text-gray-600 uppercase text-[10px]">Paid:</span>
@@ -192,7 +208,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
         {/* Left: Supplier/Customer Details */}
         <div className="flex-1 bg-gray-50 p-4 rounded border border-gray-100 print:bg-gray-50">
             <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">
-                {isPurchase ? 'Supplier Details' : 'Bill To'}
+                {isPurchase || isReturnOut ? 'Supplier Details' : 'Bill To'}
             </h3>
             {party ? (
                 <div className="text-sm">
@@ -211,7 +227,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
         {/* Right: Title & Invoice Details */}
         <div className="flex-1 flex flex-col items-end">
             <h2 className="text-xl font-bold text-gray-800 uppercase tracking-widest mb-4">
-                  {isPurchase ? 'PURCHASE INVOICE' : (isSale ? 'SALES INVOICE' : 'SALES RETURN')}
+                {isPurchase ? 'PURCHASE INVOICE' : isReturnOut ? 'PURCHASE RETURN' : (isSale ? 'SALES INVOICE' : 'SALES RETURN')}
             </h2>
 
             {/* Invoice Data - Grid for alignment */}
@@ -258,12 +274,13 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                         
                         // Price logic
                         let price = 0;
-                        if ('cost_price' in item) price = item.cost_price;
+                        if ('cost_price' in item || isPurchase || isReturnOut) price = (item as any).cost_price ?? (item as any).sale_price ?? 0;
                         else if ('sale_price' in item) price = item.sale_price;
                         
                         // Disc/Tax logic
                         const itemDisc = 'discount' in item ? item.discount : 0;
                         const itemTax = 'tax' in item ? item.tax : 0;
+                        const computedAmount = (item.quantity * price) - itemDisc + itemTax;
                         const itemDiscPct = 'discount_percent' in item ? item.discount_percent : 0;
                         const itemTaxPct = 'tax_percent' in item ? item.tax_percent : 0;
 
@@ -297,7 +314,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                                 <td className="py-2 px-1 text-right border-r border-gray-200 text-blue-600">
                                     {itemTaxPct && itemTaxPct > 0 ? `${itemTaxPct}%` : (itemTax > 0 ? `+${itemTax.toFixed(2)}` : '-')}
                                 </td>
-                                <td className="py-2 px-1 text-right font-bold">{item.amount.toFixed(2)}</td>
+                                <td className="py-2 px-1 text-right font-bold">{(item.amount ?? computedAmount).toFixed(2)}</td>
                             </tr>
                         );
                     })}

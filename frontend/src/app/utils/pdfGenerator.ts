@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { Tenant, Purchase, Sale, Return, Product, Customer, Supplier } from '../../store';
 
 // Helper types
-type TransactionType = 'Purchase' | 'Sale' | 'Return';
+type TransactionType = 'Purchase' | 'Sale' | 'Return' | 'ReturnIn' | 'ReturnOut';
 
 const toDataUrl = async (url: string): Promise<string | undefined> => {
   try {
@@ -88,7 +88,7 @@ export const generateInvoicePDF = async (
   
   doc.setFontSize(11);
   doc.setTextColor(100);
-  doc.text(type === 'Purchase' ? 'Vendor:' : 'Bill To:', 14, contentStartY);
+  doc.text(type === 'Purchase' || type === 'ReturnOut' ? 'Vendor:' : 'Bill To:', 14, contentStartY);
   
   if (party) {
     doc.setFontSize(12);
@@ -119,7 +119,13 @@ export const generateInvoicePDF = async (
   // --- Invoice Details (Right Side) ---
   doc.setFontSize(20);
   doc.setTextColor(0, 102, 204); // Blue
-  const title = type === 'Purchase' ? 'PURCHASE ORDER' : type === 'Sale' ? 'SALES INVOICE' : 'SALES RETURN';
+  const title = type === 'Purchase'
+    ? 'PURCHASE INVOICE'
+    : type === 'ReturnOut'
+      ? 'PURCHASE RETURN'
+      : type === 'Sale'
+        ? 'SALES INVOICE'
+        : 'SALES RETURN';
   doc.text(title, pageWidth - 14, contentStartY + 2, { align: 'right' });
 
   doc.setFontSize(10);
@@ -158,19 +164,19 @@ export const generateInvoicePDF = async (
     let exp = '-';
     let qty = item.quantity;
     
-    if ('cost_price' in item) { // Purchase
-       price = item.cost_price;
-       batch = item.batch_no;
-       exp = formatExpiry(item.exp_date);
-    } else if ('sale_price' in item) { // Sale
+     if ('cost_price' in item || type === 'Purchase' || type === 'ReturnOut') { // Purchase/Return Out
+       price = (item as any).cost_price ?? (item as any).sale_price ?? 0;
+       batch = (item as any).batch_no || '';
+       exp = formatExpiry((item as any).exp_date);
+     } else if ('sale_price' in item) { // Sale/Return In
        price = item.sale_price;
        batch = item.batch_no;
        exp = formatExpiry((item as any).exp_date);
-    } else { // Return
+     } else { // Fallback
        price = (item as any).sale_price || 0;
        batch = (item as any).batch_no || '';
        exp = formatExpiry((item as any).exp_date);
-    }
+     }
 
     const total = item.amount;
 
@@ -230,8 +236,8 @@ export const generateInvoicePDF = async (
       subTotal = r.sub_total || r.total_amount;
       tax = r.total_tax || 0;
       discount = r.total_discount || 0;
-      grandTotal = r.total_amount;
-      paidAmount = 0; 
+      grandTotal = r.net_amount ?? r.total_amount;
+      paidAmount = r.paid_amount ?? 0; 
   }
 
   const balance = grandTotal - paidAmount;
