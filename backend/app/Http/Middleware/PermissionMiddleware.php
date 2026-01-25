@@ -12,7 +12,11 @@ class PermissionMiddleware
     {
         $user = $request->user();
 
-        if (!$user || !$user->hasPermission($permission)) {
+        if ($user && $user->hasRole('superadmin')) {
+            return $next($request);
+        }
+
+        if (!$user || !$user->can($permission)) {
             return response()->json(['message' => 'Forbidden'], 403);
         }
 

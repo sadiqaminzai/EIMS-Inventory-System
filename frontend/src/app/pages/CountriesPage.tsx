@@ -89,15 +89,15 @@ export const CountriesPage = () => {
       header: 'Actions', 
       cell: (i: Country) => (
         <ActionButtons 
-          onView={() => setViewCountry(i)}
-          onEdit={hasPermission('product.edit') ? () => { setEditing(i); setIsOpen(true); } : undefined} 
-          onDelete={hasPermission('product.delete') ? () => setDeleteConfirmation(i.id) : undefined} 
+          onView={hasPermission('country.view') ? () => setViewCountry(i) : undefined}
+          onEdit={hasPermission('country.edit') ? () => { setEditing(i); setIsOpen(true); } : undefined} 
+          onDelete={hasPermission('country.delete') ? () => setDeleteConfirmation(i.id) : undefined} 
         />
       ) 
     }
   ];
 
-  if (!hasPermission('product.view')) return <div>Access Denied</div>;
+  if (!hasPermission('country.view')) return <div>Access Denied</div>;
 
   return (
     <>
@@ -106,7 +106,9 @@ export const CountriesPage = () => {
         columns={columns} 
         title="Countries" 
         onAdd={() => { setEditing(undefined); setIsOpen(true); }} 
-        canAdd={hasPermission('product.create')} 
+        canAdd={hasPermission('country.create')} 
+        canSearch={hasPermission('country.search')}
+        canExport={hasPermission('country.export')}
         defaultSort={{ key: 'created_at', direction: 'desc' }}
       />
       

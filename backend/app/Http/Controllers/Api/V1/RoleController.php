@@ -7,12 +7,35 @@ use App\Models\Role;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Spatie\Permission\Models\Permission;
 
 class RoleController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return Role::query()->orderBy('name')->get();
+        $tenantId = $request->input('tenant_id');
+
+        $query = Role::query()
+            ->with(['permissions', 'tenant'])
+            ->orderBy('name');
+
+        if ($tenantId) {
+            $query->where('tenant_id', (int) $tenantId);
+        }
+
+        return $query
+            ->get()
+            ->map(function (Role $role) {
+                $permNames = $role->permissions->pluck('name')->values()->all();
+                $permMap = [];
+                foreach ($permNames as $name) {
+                    $permMap[$name] = true;
+                }
+                return array_merge($role->toArray(), [
+                    'permissions' => $permMap,
+                    'tenant_name' => $role->tenant?->name,
+                ]);
+            });
     }
 
     public function store(Request $request)
@@ -23,12 +46,31 @@ class RoleController extends Controller
             'permissions' => ['nullable', 'array'],
         ]);
 
+        // Ensure the role is explicitly tied to the active tenant context
         $role = Role::create(array_merge($data, [
+            'tenant_id' => TenantContext::getTenantId(),
+            'guard_name' => 'web',
             'created_by' => $request->user()->id,
             'updated_by' => $request->user()->id,
         ]));
+        $role->load(['permissions', 'tenant']);
 
-        return response()->json($role, 201);
+        if (!empty($data['permissions'])) {
+            $permissions = collect($data['permissions'])
+                ->flatMap(function ($value, $key) {
+                    if (is_string($key)) {
+                        return $value ? [$key] : [];
+                    }
+                    return [$value];
+                })
+                ->filter()
+                ->map(fn ($name) => Permission::findOrCreate($name, 'web'));
+            $role->syncPermissions($permissions);
+        }
+
+        return response()->json(array_merge($role->toArray(), [
+            'tenant_name' => $role->tenant?->name,
+        ]), 201);
     }
 
     public function update(Request $request, Role $role)
@@ -39,11 +81,30 @@ class RoleController extends Controller
             'permissions' => ['nullable', 'array'],
         ]);
 
+        // When editing as superadmin, set tenant to the active tenant context
         $role->update(array_merge($data, [
+            'tenant_id' => TenantContext::getTenantId(),
+            'guard_name' => $role->guard_name ?? 'web',
             'updated_by' => $request->user()->id,
         ]));
+        $role->load(['permissions', 'tenant']);
 
-        return response()->json($role);
+        if (array_key_exists('permissions', $data)) {
+            $permissions = collect($data['permissions'] ?? [])
+                ->flatMap(function ($value, $key) {
+                    if (is_string($key)) {
+                        return $value ? [$key] : [];
+                    }
+                    return [$value];
+                })
+                ->filter()
+                ->map(fn ($name) => Permission::findOrCreate($name, 'web'));
+            $role->syncPermissions($permissions);
+        }
+
+        return response()->json(array_merge($role->toArray(), [
+            'tenant_name' => $role->tenant?->name,
+        ]));
     }
 
     public function destroy(Role $role)

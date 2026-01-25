@@ -208,13 +208,13 @@ export const ProductsPage = () => {
     {
       header: 'Actions',
       width: '120px',
-      cell: (item: Product) => (
-        <ActionButtons 
-          onView={() => setViewProduct(item)}
-          onEdit={hasPermission('product.edit') ? () => handleEdit(item) : undefined}
-          onDelete={hasPermission('product.delete') ? () => setDeleteConfirmation(item.id) : undefined}
-        />
-      )
+        cell: (item: Product) => (
+          <ActionButtons 
+            onView={hasPermission('product.view') ? () => setViewProduct(item) : undefined}
+            onEdit={hasPermission('product.edit') ? () => handleEdit(item) : undefined}
+            onDelete={hasPermission('product.delete') ? () => setDeleteConfirmation(item.id) : undefined}
+          />
+        )
     }
   ];
 
@@ -227,6 +227,8 @@ export const ProductsPage = () => {
         onAdd={handleAdd}
         canAdd={hasPermission('product.create')}
         addLabel="Product"
+          canSearch={hasPermission('product.search')}
+          canExport={hasPermission('product.export')}
         defaultSort={{ key: 'created_at', direction: 'desc' }}
       />
       
@@ -279,7 +281,7 @@ export const ProductsPage = () => {
                         <span className="block text-xs font-semibold text-gray-500 uppercase mb-1">Country</span>
                         <span className="font-medium text-gray-900">{countries.find(c => c.id === viewProduct.country_id)?.name || '-'}</span>
                     </div>
-                     {currentUser.role !== 'Accountant' && (
+                     {currentUser.role !== 'accountant' && (
                        <div className="bg-gray-50 p-3 rounded border border-gray-100">
                           <span className="block text-xs font-semibold text-gray-500 uppercase mb-1">Cost Price</span>
                           <span className="font-medium text-gray-900">${viewProduct.cost_price}</span>

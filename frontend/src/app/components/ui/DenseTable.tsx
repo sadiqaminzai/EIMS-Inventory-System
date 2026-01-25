@@ -21,6 +21,10 @@ interface DenseTableProps<T> {
   onAdd?: () => void;
   addLabel?: string;
   canAdd?: boolean;
+  canSearch?: boolean;
+  canExport?: boolean;
+  canExportExcel?: boolean;
+  canExportPdf?: boolean;
   defaultSort?: { key: keyof T; direction: 'asc' | 'desc' };
   headerAfterSearch?: React.ReactNode;
 }
@@ -33,6 +37,10 @@ export const DenseTable = <T extends object>({
   onAdd,
   addLabel = "Add New",
   canAdd = false,
+  canSearch = true,
+  canExport = true,
+  canExportExcel,
+  canExportPdf,
   defaultSort,
   headerAfterSearch
 }: DenseTableProps<T>) => {
@@ -88,6 +96,9 @@ export const DenseTable = <T extends object>({
     }));
   };
 
+  const allowExportExcel = canExportExcel ?? canExport;
+  const allowExportPdf = canExportPdf ?? canExport;
+
   // Export to Excel
   const exportToExcel = () => {
     const ws = XLSX.utils.json_to_sheet(sortedData);
@@ -121,28 +132,34 @@ export const DenseTable = <T extends object>({
       <div className="flex flex-col md:flex-row md:items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200 gap-3 md:gap-0">
         <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 w-full md:w-auto">
           <h2 className="text-sm font-bold text-gray-800 uppercase tracking-wide">{title}</h2>
-          <div className="relative w-full md:w-auto">
-            <Search className="absolute left-2 top-1.5 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder={searchPlaceholder}
-              className="pl-8 pr-3 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:outline-none w-full md:w-64 h-7"
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-            />
-          </div>
+          {canSearch && (
+            <div className="relative w-full md:w-auto">
+              <Search className="absolute left-2 top-1.5 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder={searchPlaceholder}
+                className="pl-8 pr-3 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:outline-none w-full md:w-64 h-7"
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+              />
+            </div>
+          )}
           {headerAfterSearch}
         </div>
         <div className="flex items-center gap-2 self-end md:self-auto">
-          <button onClick={exportToExcel} className="p-1.5 text-green-700 hover:bg-green-50 rounded" title="Export Excel">
-            <FileSpreadsheet className="h-4 w-4" />
-          </button>
-          <button onClick={exportToPDF} className="p-1.5 text-red-700 hover:bg-red-50 rounded" title="Export PDF">
-            <FileText className="h-4 w-4" />
-          </button>
+          {allowExportExcel && (
+            <button onClick={exportToExcel} className="p-1.5 text-green-700 hover:bg-green-50 rounded" title="Export Excel">
+              <FileSpreadsheet className="h-4 w-4" />
+            </button>
+          )}
+          {allowExportPdf && (
+            <button onClick={exportToPDF} className="p-1.5 text-red-700 hover:bg-red-50 rounded" title="Export PDF">
+              <FileText className="h-4 w-4" />
+            </button>
+          )}
           {canAdd && onAdd && (
             <button
               onClick={onAdd}

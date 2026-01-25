@@ -89,15 +89,15 @@ export const BrandsPage = () => {
       header: 'Actions', 
       cell: (i: Brand) => (
         <ActionButtons 
-          onView={() => setViewBrand(i)}
-          onEdit={hasPermission('product.edit') ? () => { setEditing(i); setIsOpen(true); } : undefined} 
-          onDelete={hasPermission('product.delete') ? () => setDeleteConfirmation(i.id) : undefined} 
+          onView={hasPermission('brand.view') ? () => setViewBrand(i) : undefined}
+          onEdit={hasPermission('brand.edit') ? () => { setEditing(i); setIsOpen(true); } : undefined} 
+          onDelete={hasPermission('brand.delete') ? () => setDeleteConfirmation(i.id) : undefined} 
         />
       ) 
     }
   ];
 
-  if (!hasPermission('product.view')) return <div>Access Denied</div>;
+  if (!hasPermission('brand.view')) return <div>Access Denied</div>;
 
   return (
     <>
@@ -106,7 +106,9 @@ export const BrandsPage = () => {
         columns={columns} 
         title="Brands" 
         onAdd={() => { setEditing(undefined); setIsOpen(true); }} 
-        canAdd={hasPermission('product.create')}
+        canAdd={hasPermission('brand.create')}
+        canSearch={hasPermission('brand.search')}
+        canExport={hasPermission('brand.export')}
         defaultSort={{ key: 'created_at', direction: 'desc' }} 
       />
       

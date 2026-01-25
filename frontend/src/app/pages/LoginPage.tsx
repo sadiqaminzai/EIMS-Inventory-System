@@ -21,23 +21,16 @@ export const LoginPage = () => {
       const response = await authApi.login({ email, password });
 
       localStorage.setItem('auth_token', response.token);
-      localStorage.setItem('tenant_id', '1');
-
-      const roleMap: Record<string, 'Super Admin' | 'Admin' | 'Accountant'> = {
-        superadmin: 'Super Admin',
-        admin: 'Admin',
-        manager: 'Admin',
-        staff: 'Accountant',
-        accountant: 'Accountant',
-      };
+      localStorage.setItem('tenant_id', String((response.user as any).tenant_id ?? '1'));
 
       const nextUser = {
         id: String(response.user.id),
         name: response.user.name,
         email: response.user.email,
-        role: roleMap[response.user.role] ?? 'Admin',
-        tenant_id: '1',
+        role: (response.user as any).role ?? '',
+        tenant_id: String((response.user as any).tenant_id ?? '1'),
         status: 'active',
+        must_change_password: (response.user as any).must_change_password ?? false,
       };
 
       localStorage.setItem('current_user', JSON.stringify(nextUser));

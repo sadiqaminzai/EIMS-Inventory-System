@@ -332,6 +332,13 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
     ? suppliers.map(s => ({ value: s.id, label: s.name }))
     : customers.map(c => ({ value: c.id, label: c.name }));
 
+  const invoiceTypeOptions = [
+    { label: 'Sales', value: 'sale', perm: 'sales.create' },
+    { label: 'Sales Return', value: 'return_in', perm: 'return_in.create' },
+    { label: 'Purchase', value: 'purchase', perm: 'purchase.create' },
+    { label: 'Purchase Return', value: 'return_out', perm: 'return_out.create' }
+  ].filter(opt => hasPermission(opt.perm as any));
+
   return (
     <form onSubmit={handleSubmit(onSave)} className="flex flex-col h-full">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
@@ -354,12 +361,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
         <div className="flex flex-col gap-1">
           <span className="text-[10px] font-semibold uppercase text-gray-500">Type</span>
           <div className="flex items-center gap-3 text-xs whitespace-nowrap">
-            {[
-              { label: 'Sales', value: 'sale' },
-              { label: 'Return In', value: 'return_in' },
-              { label: 'Purchase', value: 'purchase' },
-              { label: 'Return Out', value: 'return_out' }
-            ].map((opt) => (
+            {invoiceTypeOptions.map((opt) => (
               <label key={opt.value} className="flex items-center gap-1 text-gray-600">
                 <input
                   type="radio"
@@ -722,7 +724,18 @@ export const SalesPage = () => {
   const typeLabel = (type: 'sale' | 'purchase' | 'return_in' | 'return_out') =>
     type === 'sale' ? 'Sales' :
     type === 'purchase' ? 'Purchase' :
-    type === 'return_in' ? 'Return In' : 'Return Out';
+    type === 'return_in' ? 'Sales Return' : 'Purchase Return';
+
+  const permPrefixForInvoice = (sale: Sale) => {
+    const invoiceType = resolveInvoiceType(sale);
+    if (invoiceType === 'purchase') return 'purchase';
+    if (invoiceType === 'return_in') return 'return_in';
+    if (invoiceType === 'return_out') return 'return_out';
+    return 'sales';
+  };
+
+  const canInvoice = (sale: Sale, action: string) =>
+    hasPermission(`${permPrefixForInvoice(sale)}.${action}` as any);
 
   const filteredSales = enrichedSales.filter((s) => {
     const invoiceType = resolveInvoiceType(s);
@@ -742,30 +755,34 @@ export const SalesPage = () => {
       cell: (i: Sale) => (
         <div className="flex items-center gap-1">
           <ActionButtons 
-            onView={() => setViewSale(i)} 
-            onEdit={hasPermission('sales.edit') ? () => handleEdit(i) : undefined}
-            onDelete={hasPermission('sales.delete') ? () => handleDelete(i) : undefined}
-            onDownload={() => handleDownload(i)} 
+            onView={canInvoice(i, 'view') ? () => setViewSale(i) : undefined} 
+            onEdit={canInvoice(i, 'edit') ? () => handleEdit(i) : undefined}
+            onDelete={canInvoice(i, 'delete') ? () => handleDelete(i) : undefined}
+            onDownload={canInvoice(i, 'export') ? () => handleDownload(i) : undefined} 
           />
-          <Tooltip>
-            <TooltipTrigger asChild>
-                <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-8 w-8 text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                    onClick={() => onPrint(i)}
-                >
-                    <Printer className="h-4 w-4" />
-                </Button>
-            </TooltipTrigger>
-            <TooltipContent>Print Invoice</TooltipContent>
-          </Tooltip>
+          {canInvoice(i, 'print') && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                  <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8 text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                      onClick={() => onPrint(i)}
+                  >
+                      <Printer className="h-4 w-4" />
+                  </Button>
+              </TooltipTrigger>
+              <TooltipContent>Print Invoice</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       ) 
     }
   ];
 
-  if (!hasPermission('sales.view')) return <div>Access Denied</div>;
+  if (!hasPermission('invoices.view')) return <div>Access Denied</div>;
+  const canViewAny = hasPermission('sales.view') || hasPermission('purchase.view') || hasPermission('return_in.view') || hasPermission('return_out.view');
+  if (!canViewAny) return <div>Access Denied</div>;
 
   return (
     <>
@@ -794,17 +811,19 @@ export const SalesPage = () => {
               onChange={(e) => setTypeFilter(e.target.value as any)}
               options={[
                 { value: 'all', label: 'All' },
-                { value: 'sale', label: 'Sales' },
-                { value: 'return_in', label: 'Return In' },
-                { value: 'purchase', label: 'Purchase' },
-                { value: 'return_out', label: 'Return Out' }
+                ...(hasPermission('sales.view') ? [{ value: 'sale', label: 'Sales' }] : []),
+                ...(hasPermission('return_in.view') ? [{ value: 'return_in', label: 'Sales Return' }] : []),
+                ...(hasPermission('purchase.view') ? [{ value: 'purchase', label: 'Purchase' }] : []),
+                ...(hasPermission('return_out.view') ? [{ value: 'return_out', label: 'Purchase Return' }] : [])
               ]}
               className="w-40"
             />
           </div>
         }
         onAdd={handleAdd}
-        canAdd={hasPermission('sales.create')}
+        canAdd={hasPermission('sales.create') || hasPermission('purchase.create') || hasPermission('return_in.create') || hasPermission('return_out.create')}
+        canSearch={hasPermission('sales.search') || hasPermission('purchase.search') || hasPermission('return_in.search') || hasPermission('return_out.search')}
+        canExport={hasPermission('sales.export') || hasPermission('purchase.export') || hasPermission('return_in.export') || hasPermission('return_out.export')}
         addLabel="Invoice"
         defaultSort={{ key: 'created_at', direction: 'desc' }}
       />

@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\V1\TransactionController;
 use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\PrintSettingsController;
 use App\Http\Controllers\Api\V1\PaymentController;
+use App\Http\Controllers\Api\V1\PermissionController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->middleware(['api'])->group(function () {
@@ -80,6 +81,11 @@ Route::prefix('v1')->middleware(['api'])->group(function () {
         Route::post('/roles', [RoleController::class, 'store'])->middleware('permission:manage_users');
         Route::put('/roles/{role}', [RoleController::class, 'update'])->middleware('permission:manage_users');
         Route::delete('/roles/{role}', [RoleController::class, 'destroy'])->middleware('permission:manage_users');
+
+        Route::get('/permissions', [PermissionController::class, 'index'])->middleware('permission:manage_users');
+        Route::post('/permissions', [PermissionController::class, 'store'])->middleware('permission:manage_users');
+        Route::put('/permissions/{permission}', [PermissionController::class, 'update'])->middleware('permission:manage_users');
+        Route::delete('/permissions/{permission}', [PermissionController::class, 'destroy'])->middleware('permission:manage_users');
 
         Route::get('/tenants', [TenantController::class, 'index'])->middleware('permission:manage_users');
         Route::post('/tenants', [TenantController::class, 'store'])->middleware('permission:manage_users');

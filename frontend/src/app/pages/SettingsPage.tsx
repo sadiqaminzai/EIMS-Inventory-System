@@ -1,5 +1,6 @@
 import { useForm } from 'react-hook-form';
-import { useStore, Tenant, PrintSettings, User, Role, Permission } from '../../store';
+import { useStore, Tenant, PrintSettings, User, Role, Permission, RoleItem } from '../../store';
+import { roleApi } from '../../api/roles';
 import { DenseInput, DenseSelect } from '../components/ui/Form';
 import { useState, useEffect } from 'react';
 import { clsx } from 'clsx';
@@ -381,7 +382,7 @@ const ClientsTab = () => {
       width: '120px',
       cell: (item: Tenant) => (
         <ActionButtons 
-          onView={() => setViewClient(item)}
+                    onView={hasPermission('client.view') ? () => setViewClient(item) : undefined}
           onEdit={hasPermission('client.edit') ? () => handleEdit(item) : undefined}
           onDelete={hasPermission('client.delete') ? () => setDeleteConfirmation(item.id) : undefined}
         />
@@ -402,6 +403,8 @@ const ClientsTab = () => {
         onAdd={handleAdd}
         canAdd={hasPermission('client.create')}
         addLabel="Client"
+                canSearch={hasPermission('client.search')}
+                canExport={hasPermission('client.export')}
         defaultSort={{ key: 'name', direction: 'asc' }}
       />
       
@@ -538,11 +541,14 @@ const ClientsTab = () => {
 // --- Components for Users Tab ---
 
 const UserForm = ({ initialData, onSave, onCancel }: { initialData?: User, onSave: (data: any) => void, onCancel: () => void }) => {
-    const { currentUser } = useStore();
-    const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<User & { avatar_file?: File }>({
+    const { currentUser, roles, clients, tenant } = useStore();
+    const DEFAULT_PASSWORD = 'password';
+    const defaultRole = initialData?.role ?? roles[0]?.name ?? '';
+    const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<User & { avatar_file?: File; tenant_id?: string; password?: string }>({
         defaultValues: initialData || {
             status: 'active',
-            role: 'Admin'
+            role: defaultRole,
+            tenant_id: tenant.id
         }
     });
     
@@ -560,14 +566,63 @@ const UserForm = ({ initialData, onSave, onCancel }: { initialData?: User, onSav
         }
     };
 
-    const roleOptions = [
-        { value: 'Admin', label: 'Admin' },
-        { value: 'Accountant', label: 'Accountant' }
-    ];
+    const formatRoleLabel = (name?: string) =>
+        (name ?? '')
+            .replace(/[-_]/g, ' ')
+            .replace(/\b\w/g, (c) => c.toUpperCase());
 
-    if (currentUser.role === 'Super Admin') {
-        roleOptions.unshift({ value: 'Super Admin', label: 'Super Admin' });
-    }
+    const selectedRole = watch('role');
+    const selectedTenantId = watch('tenant_id');
+    const isSuperAdmin = currentUser.role === 'superadmin';
+    const requiresTenant = isSuperAdmin && selectedRole !== 'superadmin';
+    const [tenantRoles, setTenantRoles] = useState<RoleItem[] | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        if (!isSuperAdmin || !selectedTenantId) {
+            setTenantRoles(null);
+            return;
+        }
+        roleApi.list({ tenant_id: selectedTenantId })
+            .then((list) => {
+                if (!active) return;
+                const mapped: RoleItem[] = (list ?? []).map((r) => ({
+                    id: Number(r.id),
+                    name: r.name,
+                    tenant_id: r.tenant_id !== undefined && r.tenant_id !== null ? String(r.tenant_id) : undefined,
+                    description: r.description ?? null,
+                    permissions: r.permissions ?? null,
+                }));
+                setTenantRoles(mapped);
+            })
+            .catch(() => {
+                if (active) setTenantRoles([]);
+            });
+        return () => {
+            active = false;
+        };
+    }, [isSuperAdmin, selectedTenantId]);
+
+    const roleOptions = (tenantRoles ?? roles)
+        .filter((role) => currentUser.role === 'superadmin' || role.name !== 'superadmin')
+        .filter((role) => !requiresTenant || !selectedTenantId || !role.tenant_id || String(role.tenant_id) === String(selectedTenantId))
+        .map((role) => ({ value: role.name, label: formatRoleLabel(role.name) }));
+
+    const tenantOptions = (clients ?? []).map((t) => ({ value: t.id, label: t.name }));
+
+    useEffect(() => {
+        if (!isSuperAdmin) {
+            setValue('tenant_id', tenant.id, { shouldDirty: true });
+            return;
+        }
+        if (selectedRole === 'superadmin') {
+            setValue('tenant_id', '', { shouldDirty: true });
+            return;
+        }
+        if (!selectedTenantId && tenantOptions.length > 0) {
+            setValue('tenant_id', String(tenantOptions[0].value), { shouldDirty: true });
+        }
+    }, [isSuperAdmin, selectedRole, selectedTenantId, tenant.id, tenantOptions, setValue]);
 
     return (
         <form onSubmit={handleSubmit(onSave)} className="space-y-4">
@@ -606,6 +661,27 @@ const UserForm = ({ initialData, onSave, onCancel }: { initialData?: User, onSav
 
             <DenseInput label="Full Name" {...register('name', { required: 'Required' })} error={errors.name?.message} />
             <DenseInput label="Email" type="email" {...register('email', { required: 'Required' })} error={errors.email?.message} />
+            {!initialData && (
+                <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-xs text-blue-700">
+                    Default password is <span className="font-mono font-semibold">{DEFAULT_PASSWORD}</span>. The user can change it after first login.
+                </div>
+            )}
+            {!initialData && (
+                <DenseInput
+                    label="Password (optional)"
+                    type="password"
+                    placeholder={`Leave blank to use ${DEFAULT_PASSWORD}`}
+                    {...register('password')}
+                />
+            )}
+            {requiresTenant && (
+                <DenseSelect
+                    label="Tenant"
+                    options={tenantOptions}
+                    {...register('tenant_id', { required: 'Required' })}
+                    error={errors.tenant_id?.message as string}
+                />
+            )}
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <DenseSelect 
@@ -636,7 +712,11 @@ const UserForm = ({ initialData, onSave, onCancel }: { initialData?: User, onSav
 };
 
 const UsersTab = () => {
-    const { users, addUser, updateUser, deleteUser, hasPermission } = useStore();
+    const { users, addUser, updateUser, deleteUser, hasPermission, currentUser } = useStore();
+    const formatRoleLabel = (name?: string) =>
+        (name ?? '')
+            .replace(/[-_]/g, ' ')
+            .replace(/\b\w/g, (c) => c.toUpperCase());
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingUser, setEditingUser] = useState<User | undefined>(undefined);
     const [viewUser, setViewUser] = useState<User | null>(null);
@@ -652,10 +732,13 @@ const UsersTab = () => {
     };
 
     const handleSave = (data: any) => {
+        const normalized = currentUser?.role === 'superadmin'
+            ? data
+            : { ...data, tenant_id: currentUser?.tenant_id };
         if (editingUser) {
-            updateUser(editingUser.id, data);
+            updateUser(editingUser.id, normalized);
         } else {
-            addUser({ ...data, id: nanoid(), tenant_id: 'current' });
+            addUser({ ...normalized, id: nanoid() });
         }
         setIsModalOpen(false);
     };
@@ -681,8 +764,14 @@ const UsersTab = () => {
             accessorKey: 'role' as keyof User,
             cell: (item: User) => (
                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                    {item.role}
+                    {formatRoleLabel(item.role)}
                 </span>
+            )
+        },
+        {
+            header: 'Tenant',
+            cell: (item: User) => (
+                <span className="text-xs text-gray-600">{item.tenant_name || '-'}</span>
             )
         },
         { 
@@ -700,9 +789,9 @@ const UsersTab = () => {
             width: '100px',
             cell: (item: User) => (
                 <ActionButtons 
-                    onView={hasPermission('settings.view') ? () => setViewUser(item) : undefined}
-                    onEdit={hasPermission('settings.edit') ? () => { setEditingUser(item); setIsModalOpen(true); } : undefined}
-                    onDelete={hasPermission('settings.edit') ? () => setDeleteId(item.id) : undefined}
+                    onView={hasPermission('user.view') ? () => setViewUser(item) : undefined}
+                    onEdit={hasPermission('user.edit') ? () => { setEditingUser(item); setIsModalOpen(true); } : undefined}
+                    onDelete={hasPermission('user.delete') ? () => setDeleteId(item.id) : undefined}
                 />
             )
         }
@@ -718,7 +807,9 @@ const UsersTab = () => {
                 title="User Management"
                 onAdd={() => { setEditingUser(undefined); setIsModalOpen(true); }}
                 addLabel="User"
-                canAdd={hasPermission('settings.edit')} // Assuming settings.edit covers user management for now
+                canAdd={hasPermission('user.create')}
+                canSearch={hasPermission('user.search')}
+                canExport={hasPermission('user.export')}
             />
             
             <Modal open={isModalOpen} onOpenChange={setIsModalOpen} title={editingUser ? "Edit User" : "Add User"} className="max-w-md">
@@ -750,7 +841,7 @@ const UsersTab = () => {
                         <div className="grid grid-cols-2 gap-3 text-sm">
                             <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
                                 <div className="text-[11px] uppercase tracking-wide text-gray-500">Role</div>
-                                <div className="text-sm font-semibold text-gray-900 mt-1">{viewUser.role}</div>
+                                <div className="text-sm font-semibold text-gray-900 mt-1">{formatRoleLabel(viewUser.role)}</div>
                             </div>
                             <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
                                 <div className="text-[11px] uppercase tracking-wide text-gray-500">Status</div>
@@ -795,9 +886,30 @@ const UsersTab = () => {
 
 // --- Components for Roles Tab ---
 
-const RoleForm = ({ role, permissions, onSave, onCancel }: { role: Role, permissions: Permission[], onSave: (perms: Permission[]) => void, onCancel: () => void }) => {
-    const { handleSubmit } = useForm();
-    const [selectedPerms, setSelectedPerms] = useState<Permission[]>(permissions);
+const RoleForm = ({ initialData, initialPermissions, onSave, onCancel }: { initialData?: RoleItem, initialPermissions: Permission[], onSave: (data: { name: string; description?: string | null; permissions: Permission[]; tenant_id?: string }) => void, onCancel: () => void }) => {
+    const { permissionsCatalog, currentUser, clients, tenant } = useStore();
+    const { register, handleSubmit, reset, formState: { errors } } = useForm<{ name: string; description?: string | null }>({
+        defaultValues: {
+            name: initialData?.name ?? '',
+            description: initialData?.description ?? ''
+        }
+    });
+    const [selectedPerms, setSelectedPerms] = useState<Permission[]>(initialPermissions);
+
+    useEffect(() => {
+        reset({
+            name: initialData?.name ?? '',
+            description: initialData?.description ?? ''
+        });
+        setSelectedPerms(initialPermissions);
+        setSelectedTenant(initialData?.tenant_id ?? tenant.id ?? '');
+    }, [initialData, initialPermissions, reset, tenant.id]);
+
+    const isSuperAdmin = currentUser.role === 'superadmin';
+    const tenantOptions = (clients ?? []).map((t) => ({ value: t.id, label: t.name }));
+    const [selectedTenant, setSelectedTenant] = useState<string>(
+        initialData?.tenant_id ?? tenant.id ?? ''
+    );
 
     const togglePerm = (perm: Permission) => {
         if (selectedPerms.includes(perm)) {
@@ -807,110 +919,418 @@ const RoleForm = ({ role, permissions, onSave, onCancel }: { role: Role, permiss
         }
     };
 
-    // Group permissions for display
-    const groups = {
-        'Products': ['product.view', 'product.create', 'product.edit', 'product.delete'],
-        'Suppliers': ['supplier.view', 'supplier.create', 'supplier.edit', 'supplier.delete'],
-        'Customers': ['customer.view', 'customer.create', 'customer.edit', 'customer.delete'],
-        'Purchases': ['purchase.view', 'purchase.create', 'purchase.edit', 'purchase.delete'],
-        'Sales': ['sales.view', 'sales.create', 'sales.edit', 'sales.delete'],
-        'Returns': ['return.view', 'return.create', 'return.edit', 'return.delete'],
-        'Accounts': ['account.view', 'account.create', 'account.edit', 'account.delete'],
-        // 'Reports' removed as per request
-        'Settings': [
-            'settings.view',
-            'settings.edit',
-            'settings.general',
-            'settings.print',
-            'settings.clients',
-            'settings.users',
-            'settings.roles',
-            'settings.permissions',
-            'settings.profile'
-        ],
-        'Clients': ['client.view', 'client.create', 'client.edit', 'client.delete']
+    const formatGroupLabel = (name: string) =>
+        name
+            .replace(/[-_]/g, ' ')
+            .replace(/\b\w/g, (c) => c.toUpperCase());
+
+    const groupLabelMap: Record<string, string> = {
+        inventory: 'Inventory',
+        partners: 'Partners',
+        invoices: 'Invoices',
+        product: 'Products',
+        brand: 'Brands',
+        country: 'Countries',
+        supplier: 'Suppliers',
+        customer: 'Customers',
+        purchase: 'Purchases',
+        sales: 'Sales',
+        return_in: 'Sales Return',
+        return_out: 'Purchase Return',
+        return: 'Sales Return',
+        account: 'Accounts',
+        account_transactions: 'Transactions',
+        account_accounts: 'Accounts',
+        account_transaction: 'Transaction Types',
+        settings: 'Settings',
+        user: 'Users',
+        role: 'Roles',
+        permission: 'Permissions',
+        client: 'Clients',
     };
 
+    const actionLabelMap: Record<string, string> = {
+        view: 'View',
+        create: 'Add',
+        edit: 'Edit',
+        delete: 'Delete',
+        search: 'Search',
+        export: 'Export',
+        print: 'Print',
+        payment: 'Payment',
+        income: 'Income',
+        expense: 'Expense',
+        transfer: 'Transfer',
+        save: 'Save',
+        cancel: 'Cancel',
+    };
+
+    const groupOrder = [
+        'inventory', 'partners', 'invoices',
+        'product', 'brand', 'country',
+        'supplier', 'customer',
+        'purchase', 'sales', 'return_in', 'return_out',
+        'account', 'account_transactions', 'account_accounts', 'account_transaction',
+        'settings', 'user', 'role', 'permission', 'client',
+    ];
+
+    const actionOrder = ['view', 'create', 'edit', 'delete', 'search', 'export', 'print', 'payment', 'income', 'expense', 'transfer', 'save', 'cancel'];
+
+    const groups = permissionsCatalog.reduce<Record<string, Permission[]>>((acc, perm) => {
+        let group = 'Other';
+        if (perm.startsWith('manage_')) {
+            group = perm.replace('manage_', '');
+        } else if (perm.startsWith('partners.')) {
+            group = 'partners';
+        } else if (perm.startsWith('invoices.')) {
+            group = 'invoices';
+        } else if (perm.startsWith('account.transactions.')) {
+            group = 'account_transactions';
+        } else if (perm.startsWith('account.accounts.')) {
+            group = 'account_accounts';
+        } else if (perm.startsWith('account.transaction.')) {
+            group = 'account_transaction';
+        } else if (perm.includes('.')) {
+            group = perm.split('.')[0];
+        }
+        acc[group] = acc[group] || [];
+        acc[group].push(perm);
+        return acc;
+    }, {} as Record<string, Permission[]>);
+
+    const sortPerms = (perms: Permission[]) =>
+        [...perms].sort((p1, p2) => {
+            const aParts = p1.split('.');
+            const bParts = p2.split('.');
+            const aKey = aParts[aParts.length - 1] || p1;
+            const bKey = bParts[bParts.length - 1] || p2;
+            const aIdx = actionOrder.indexOf(aKey);
+            const bIdx = actionOrder.indexOf(bKey);
+            if (aIdx === -1 && bIdx === -1) return p1.localeCompare(p2);
+            if (aIdx === -1) return 1;
+            if (bIdx === -1) return -1;
+            return aIdx - bIdx;
+        });
+
+    const orderedGroups = Object.entries(groups)
+        .sort(([a], [b]) => {
+            const aIdx = groupOrder.indexOf(a);
+            const bIdx = groupOrder.indexOf(b);
+            if (aIdx === -1 && bIdx === -1) return a.localeCompare(b);
+            if (aIdx === -1) return 1;
+            if (bIdx === -1) return -1;
+            return aIdx - bIdx;
+        })
+        .map(([groupKey, perms]) => [groupKey, sortPerms(perms)] as const);
+
+    const permissionsByGroup = Object.fromEntries(orderedGroups) as Record<string, Permission[]>;
+
+    const mainPanels = [
+        {
+            key: 'inventory',
+            label: 'Inventory',
+            groups: [
+                { key: 'inventory', label: 'Main' },
+                { key: 'product', label: 'Products' },
+                { key: 'brand', label: 'Brands' },
+                { key: 'country', label: 'Countries' },
+            ],
+        },
+        {
+            key: 'partners',
+            label: 'Partners',
+            groups: [
+                { key: 'partners', label: 'Main' },
+                { key: 'customer', label: 'Customers' },
+                { key: 'supplier', label: 'Suppliers' },
+            ],
+        },
+        {
+            key: 'invoices',
+            label: 'Invoices',
+            groups: [
+                { key: 'invoices', label: 'Main' },
+                { key: 'sales', label: 'Sales' },
+                { key: 'purchase', label: 'Purchases' },
+                { key: 'return_in', label: 'Sales Return' },
+                { key: 'return_out', label: 'Purchase Return' },
+            ],
+        },
+        {
+            key: 'accounts',
+            label: 'Accounts',
+            groups: [
+                { key: 'account', label: 'Main' },
+                { key: 'account_accounts', label: 'Accounts' },
+                { key: 'account_transactions', label: 'Transactions' },
+                { key: 'account_transaction', label: 'Transaction Types' },
+            ],
+        },
+        {
+            key: 'settings',
+            label: 'Settings',
+            groups: [
+                { key: 'settings', label: 'Main' },
+                { key: 'user', label: 'Users' },
+                { key: 'role', label: 'Roles' },
+                { key: 'permission', label: 'Permissions' },
+                { key: 'client', label: 'Clients' },
+            ],
+        },
+    ];
+
+    const resolveGroupLabel = (groupKey: string) => groupLabelMap[groupKey] || formatGroupLabel(groupKey);
+    const resolveActionLabel = (perm: string) => {
+        const parts = perm.split('.');
+        const action = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+        return actionLabelMap[action] || formatGroupLabel(action);
+    };
+
+    const usedGroupKeys = new Set(mainPanels.flatMap((panel) => panel.groups.map((g) => g.key)));
+    const otherGroups = orderedGroups
+        .filter(([groupKey]) => !usedGroupKeys.has(groupKey))
+        .map(([groupKey, perms]) => ({ key: groupKey, label: resolveGroupLabel(groupKey), perms }));
+
     return (
-        <form onSubmit={(e) => { e.preventDefault(); onSave(selectedPerms); }} className="flex flex-col h-[70vh]">
+        <form onSubmit={handleSubmit((data) => onSave({ ...data, permissions: selectedPerms, tenant_id: isSuperAdmin ? selectedTenant : undefined }))} className="flex flex-col h-[70vh]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <DenseInput label="Role Name" {...register('name', { required: 'Required' })} error={errors.name?.message} />
+                <DenseInput label="Description" {...register('description')} />
+                {isSuperAdmin && (
+                    <DenseSelect
+                        label="Tenant"
+                        options={tenantOptions}
+                        value={selectedTenant}
+                        onChange={(e) => setSelectedTenant(e.target.value)}
+                    />
+                )}
+            </div>
             <div className="flex-1 overflow-y-auto pr-2">
-                {Object.entries(groups).map(([group, perms]) => (
-                    <div key={group} className="mb-6">
-                        <h4 className="text-sm font-bold text-gray-900 border-b border-gray-100 pb-2 mb-3">{group}</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                            {perms.map((perm) => (
-                                <label key={perm} className="flex items-center gap-2 text-sm text-gray-600 p-2 rounded hover:bg-gray-50 cursor-pointer">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={selectedPerms.includes(perm as Permission)} 
-                                        onChange={() => togglePerm(perm as Permission)}
-                                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                    />
-                                    {perm.split('.')[1]}
-                                </label>
+                {mainPanels.map((panel) => {
+                    const hasAny = panel.groups.some((g) => (permissionsByGroup[g.key]?.length ?? 0) > 0);
+                    if (!hasAny) return null;
+                    return (
+                        <div key={panel.key} className="mb-6 border border-gray-200 rounded-lg p-4 bg-white shadow-sm">
+                            <div className="flex items-center justify-between border-b border-gray-100 pb-2 mb-3">
+                                <h4 className="text-sm font-bold text-gray-900">{panel.label}</h4>
+                            </div>
+                            <div className="space-y-3">
+                                {panel.groups.map((group) => {
+                                    const perms = permissionsByGroup[group.key] ?? [];
+                                    if (perms.length === 0) return null;
+                                    return (
+                                        <div key={group.key} className="flex flex-col gap-2">
+                                            <div className="text-[11px] font-semibold uppercase text-gray-500">{group.label}</div>
+                                            <div className="flex flex-nowrap gap-2 overflow-x-auto pb-1">
+                                                {perms.map((perm) => (
+                                                    <label key={perm} className="flex items-center gap-2 text-xs text-gray-700 px-2 py-1 rounded-full bg-gray-50 hover:bg-gray-100 cursor-pointer whitespace-nowrap border border-gray-200 flex-shrink-0">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            checked={selectedPerms.includes(perm as Permission)} 
+                                                            onChange={() => togglePerm(perm as Permission)}
+                                                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                        />
+                                                        {resolveActionLabel(perm)}
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    );
+                })}
+                {otherGroups.length > 0 && (
+                    <div className="mb-6 border border-gray-200 rounded-lg p-4 bg-white shadow-sm">
+                        <div className="flex items-center justify-between border-b border-gray-100 pb-2 mb-3">
+                            <h4 className="text-sm font-bold text-gray-900">Other</h4>
+                        </div>
+                        <div className="space-y-3">
+                            {otherGroups.map((group) => (
+                                <div key={group.key} className="flex flex-col gap-2">
+                                    <div className="text-[11px] font-semibold uppercase text-gray-500">{group.label}</div>
+                                    <div className="flex flex-nowrap gap-2 overflow-x-auto pb-1">
+                                        {group.perms.map((perm) => (
+                                            <label key={perm} className="flex items-center gap-2 text-xs text-gray-700 px-2 py-1 rounded-full bg-gray-50 hover:bg-gray-100 cursor-pointer whitespace-nowrap border border-gray-200 flex-shrink-0">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={selectedPerms.includes(perm as Permission)} 
+                                                    onChange={() => togglePerm(perm as Permission)}
+                                                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                />
+                                                {resolveActionLabel(perm)}
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
                             ))}
                         </div>
                     </div>
-                ))}
+                )}
             </div>
             <div className="border-t pt-4 mt-2 flex justify-end gap-2 bg-white">
-                <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-                <Button type="submit">Save Permissions</Button>
+                <Button type="button" variant="outline" onClick={onCancel} className="gap-2 text-gray-700 border-gray-300 hover:bg-gray-50">
+                    <X size={14} /> Cancel
+                </Button>
+                <Button type="submit" className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white">
+                    <Save size={14} /> Save
+                </Button>
             </div>
         </form>
     );
 };
 
 const RolesTab = () => {
-    const { rolePermissions, updateRolePermissions, hasPermission } = useStore();
-    const [editingRole, setEditingRole] = useState<Role | null>(null);
+    const { roles, rolePermissions, addRole, updateRole, deleteRole, hasPermission } = useStore();
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingRole, setEditingRole] = useState<RoleItem | undefined>(undefined);
+    const [viewRole, setViewRole] = useState<RoleItem | null>(null);
+    const [deleteRoleId, setDeleteRoleId] = useState<number | null>(null);
 
-    const roles: Role[] = ['Super Admin', 'Admin', 'Accountant'];
+    const formatRoleLabel = (name?: string) =>
+        (name ?? '')
+            .replace(/[-_]/g, ' ')
+            .replace(/\b\w/g, (c) => c.toUpperCase());
+
+    const columns = [
+        {
+            header: 'Role',
+            accessorKey: 'name' as keyof RoleItem,
+            sortable: true,
+            cell: (item: RoleItem) => (
+                <div className="flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-blue-600" />
+                    <span className="font-medium text-gray-900">{formatRoleLabel(item.name)}</span>
+                </div>
+            )
+        },
+        {
+            header: 'Tenant',
+            accessorKey: 'tenant_name' as keyof RoleItem,
+            cell: (item: RoleItem) => (
+                <span className="text-xs text-gray-600">{item.tenant_name || '-'}</span>
+            )
+        },
+        {
+            header: 'Description',
+            accessorKey: 'description' as keyof RoleItem,
+            cell: (item: RoleItem) => (
+                <span className="text-xs text-gray-600">{item.description || '-'}</span>
+            )
+        },
+        {
+            header: 'Permissions',
+            cell: (item: RoleItem) => (
+                <span className="text-xs text-gray-600">
+                    {rolePermissions[item.name]?.length || 0} assigned
+                </span>
+            )
+        },
+        {
+            header: 'Actions',
+            width: '120px',
+            cell: (item: RoleItem) => (
+                <ActionButtons
+                    onView={hasPermission('role.view') ? () => setViewRole(item) : undefined}
+                    onEdit={hasPermission('role.edit') ? () => { setEditingRole(item); setIsModalOpen(true); } : undefined}
+                    onDelete={hasPermission('role.delete') ? () => setDeleteRoleId(item.id) : undefined}
+                />
+            )
+        }
+    ];
+
+    const handleSave = (data: { name: string; description?: string | null; permissions: Permission[] }) => {
+        if (editingRole) {
+            updateRole(String(editingRole.id), data);
+        } else {
+            addRole(data);
+        }
+        setIsModalOpen(false);
+    };
 
     if (!hasPermission('settings.view')) return <div>Access Denied</div>;
 
     return (
         <div className="space-y-4">
-             <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold text-gray-900">Roles & Permissions</h3>
-             </div>
-             
-             <div className="grid gap-4">
-                {roles.map(role => (
-                    <div key={role} className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-lg shadow-sm hover:border-blue-200 transition-colors">
-                        <div>
-                            <div className="flex items-center gap-2">
-                                <Shield className="w-5 h-5 text-blue-600" />
-                                <h4 className="font-bold text-gray-900">{role}</h4>
-                            </div>
-                            <p className="text-sm text-gray-500 mt-1 pl-7">
-                                {rolePermissions[role]?.length || 0} permissions assigned
-                            </p>
-                        </div>
-                        {hasPermission('settings.edit') && (
-                            <Button variant="outline" size="sm" onClick={() => setEditingRole(role)}>
-                                Manage Permissions
-                            </Button>
-                        )}
-                    </div>
-                ))}
-             </div>
+            <DenseTable
+                data={roles}
+                columns={columns}
+                title="Roles"
+                onAdd={() => { setEditingRole(undefined); setIsModalOpen(true); }}
+                addLabel="Role"
+                canAdd={hasPermission('role.create')}
+                canSearch={hasPermission('role.search')}
+                canExport={hasPermission('role.export')}
+                defaultSort={{ key: 'name', direction: 'asc' }}
+            />
 
-             <Modal 
-                open={!!editingRole} 
-                onOpenChange={(open) => !open && setEditingRole(null)} 
-                title={`Manage Permissions: ${editingRole}`}
+            <Modal
+                open={isModalOpen}
+                onOpenChange={(open) => {
+                    setIsModalOpen(open);
+                    if (!open) setEditingRole(undefined);
+                }}
+                title={editingRole ? `Edit Role: ${formatRoleLabel(editingRole.name)}` : 'Add Role'}
+                className="max-w-7xl w-[92vw]"
+            >
+                <RoleForm
+                    initialData={editingRole}
+                    initialPermissions={editingRole ? (rolePermissions[editingRole.name] ?? []) : []}
+                    onSave={handleSave}
+                    onCancel={() => { setIsModalOpen(false); setEditingRole(undefined); }}
+                />
+            </Modal>
+
+            <Modal
+                open={!!viewRole}
+                onOpenChange={(open) => !open && setViewRole(null)}
+                title={`Role Details: ${formatRoleLabel(viewRole?.name ?? '')}`}
                 className="max-w-3xl"
             >
-                {editingRole && (
-                    <RoleForm 
-                        role={editingRole} 
-                        permissions={rolePermissions[editingRole]} 
-                        onSave={(perms) => { updateRolePermissions(editingRole, perms); setEditingRole(null); }} 
-                        onCancel={() => setEditingRole(null)} 
-                    />
+                {viewRole && (
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                                <div className="text-[11px] uppercase tracking-wide text-gray-500">Role Name</div>
+                                <div className="text-sm font-semibold text-gray-900 mt-1">{formatRoleLabel(viewRole.name)}</div>
+                            </div>
+                            <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                                <div className="text-[11px] uppercase tracking-wide text-gray-500">Description</div>
+                                <div className="text-sm font-semibold text-gray-900 mt-1">{viewRole.description || '-'}</div>
+                            </div>
+                        </div>
+                        <div className="rounded-md border border-gray-100 bg-white p-3">
+                            <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">Permissions</div>
+                            <div className="flex flex-wrap gap-2">
+                                {(rolePermissions[viewRole.name] ?? []).length > 0 ? (
+                                    (rolePermissions[viewRole.name] ?? []).map((perm) => (
+                                        <span key={perm} className="px-2 py-0.5 rounded-full text-[11px] bg-blue-50 text-blue-700">
+                                            {perm}
+                                        </span>
+                                    ))
+                                ) : (
+                                    <span className="text-xs text-gray-400">No permissions assigned</span>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex justify-end pt-2 border-t border-gray-100">
+                            <Button variant="outline" size="sm" onClick={() => setViewRole(null)}>
+                                Close
+                            </Button>
+                        </div>
+                    </div>
                 )}
             </Modal>
+
+            <ConfirmationDialog
+                open={deleteRoleId !== null}
+                onOpenChange={(open) => !open && setDeleteRoleId(null)}
+                title="Delete Role"
+                description="Are you sure you want to delete this role? This action cannot be undone."
+                onConfirm={() => { if (deleteRoleId !== null) deleteRole(String(deleteRoleId)); setDeleteRoleId(null); }}
+                confirmLabel="Delete"
+            />
         </div>
     );
 };
@@ -918,44 +1338,138 @@ const RolesTab = () => {
 // --- Components for Permissions Tab (Reference) ---
 
 const PermissionsTab = () => {
-    const allPermissions = [
-        'product.view', 'product.create', 'product.edit', 'product.delete',
-        'supplier.view', 'supplier.create', 'supplier.edit', 'supplier.delete',
-        'customer.view', 'customer.create', 'customer.edit', 'customer.delete',
-        'purchase.view', 'purchase.create', 'purchase.edit', 'purchase.delete',
-        'sales.view', 'sales.create', 'sales.edit', 'sales.delete',
-        'return.view', 'return.create', 'return.edit', 'return.delete',
-        'account.view', 'account.create', 'account.edit', 'account.delete',
-        // 'report.view', // Removed
-        'settings.view', 'settings.edit',
-        'settings.general', 'settings.print', 'settings.clients', 'settings.users',
-        'settings.roles', 'settings.permissions', 'settings.profile',
-        'client.view', 'client.create', 'client.edit', 'client.delete'
+    const { permissions, permissionsCatalog, addPermission, updatePermission, deletePermission, hasPermission } = useStore();
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingPermission, setEditingPermission] = useState<{ id: number; name: string } | null>(null);
+    const [viewPermission, setViewPermission] = useState<{ id: number; name: string } | null>(null);
+    const [deletePermissionId, setDeletePermissionId] = useState<number | null>(null);
+
+    const { register, handleSubmit, reset, formState: { errors } } = useForm<{ name: string }>({
+        defaultValues: { name: '' }
+    });
+
+    useEffect(() => {
+        reset({ name: editingPermission?.name ?? '' });
+    }, [editingPermission, reset]);
+
+    const handleSave = (data: { name: string }) => {
+        if (editingPermission) {
+            updatePermission(String(editingPermission.id), data);
+        } else {
+            addPermission(data);
+        }
+        setIsModalOpen(false);
+        setEditingPermission(null);
+    };
+
+    const columns = [
+        { header: 'Permission Key', accessorKey: 'name' as keyof { name: string }, sortable: true },
+        {
+            header: 'Description',
+            cell: (item: { name: string }) => (
+                <span className="text-xs text-gray-600">Allows the user to access {item.name}</span>
+            )
+        },
+        {
+            header: 'Actions',
+            width: '120px',
+            cell: (item: { id: number; name: string }) => (
+                <ActionButtons
+                    onView={hasPermission('permission.view') ? () => setViewPermission({ id: item.id, name: item.name }) : undefined}
+                    onEdit={hasPermission('permission.edit') ? () => { setEditingPermission({ id: item.id, name: item.name }); setIsModalOpen(true); } : undefined}
+                    onDelete={hasPermission('permission.edit') ? () => setDeletePermissionId(item.id) : undefined}
+                />
+            )
+        }
     ];
+
+    if (!hasPermission('permission.view')) return <div>Access Denied</div>;
+
+    const permissionMap = new Map<string, { id: number; name: string }>();
+    permissionsCatalog.forEach((name, idx) => {
+        if (!permissionMap.has(name)) {
+            permissionMap.set(name, { id: idx + 1, name });
+        }
+    });
+    permissions.forEach((perm) => {
+        if (!permissionMap.has(perm.name)) {
+            permissionMap.set(perm.name, { id: perm.id, name: perm.name });
+        } else {
+            const existing = permissionMap.get(perm.name)!;
+            if (!existing.id && perm.id) permissionMap.set(perm.name, { id: perm.id, name: perm.name });
+        }
+    });
+    const permissionsTableData = Array.from(permissionMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 
     return (
         <div className="space-y-4">
-            <h3 className="text-lg font-bold text-gray-900 mb-4">System Permissions Reference</h3>
-            <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                    <thead className="bg-gray-50 text-gray-700 font-medium">
-                        <tr>
-                            <th className="px-4 py-3">Permission Key</th>
-                            <th className="px-4 py-3">Description</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                        {allPermissions.map(perm => (
-                            <tr key={perm} className="hover:bg-gray-50">
-                                <td className="px-4 py-2 font-mono text-xs text-blue-600">{perm}</td>
-                                <td className="px-4 py-2 text-gray-600">
-                                    Allows the user to {perm.split('.')[1]} {perm.split('.')[0]}s
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+            <DenseTable
+                data={permissionsTableData}
+                columns={columns as any}
+                title="System Permissions"
+                onAdd={() => { setEditingPermission(null); setIsModalOpen(true); }}
+                addLabel="Permission"
+                canAdd={hasPermission('permission.edit')}
+                canSearch={hasPermission('permission.search')}
+                canExport={hasPermission('permission.export')}
+                defaultSort={{ key: 'name', direction: 'asc' }}
+            />
+
+            <Modal
+                open={isModalOpen}
+                onOpenChange={(open) => {
+                    setIsModalOpen(open);
+                    if (!open) setEditingPermission(null);
+                }}
+                title={editingPermission ? 'Edit Permission' : 'Add Permission'}
+                className="max-w-lg"
+            >
+                <form onSubmit={handleSubmit(handleSave)} className="space-y-4">
+                    <DenseInput label="Permission Key" {...register('name', { required: 'Required' })} error={errors.name?.message} />
+                    <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+                        <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)} className="gap-2 text-gray-700 border-gray-300 hover:bg-gray-50">
+                            <X size={14} /> Cancel
+                        </Button>
+                        <Button type="submit" className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white">
+                            <Save size={14} /> Save
+                        </Button>
+                    </div>
+                </form>
+            </Modal>
+
+            <Modal
+                open={!!viewPermission}
+                onOpenChange={(open) => !open && setViewPermission(null)}
+                title="Permission Details"
+                className="max-w-lg"
+            >
+                {viewPermission && (
+                    <div className="space-y-4">
+                        <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                            <div className="text-[11px] uppercase tracking-wide text-gray-500">Permission Key</div>
+                            <div className="text-sm font-semibold text-gray-900 mt-1 font-mono">{viewPermission.name}</div>
+                        </div>
+                        <div className="rounded-md border border-gray-100 bg-white p-3">
+                            <div className="text-[11px] uppercase tracking-wide text-gray-500">Description</div>
+                            <div className="text-sm text-gray-600 mt-1">Allows the user to access {viewPermission.name}</div>
+                        </div>
+                        <div className="flex justify-end pt-2 border-t border-gray-100">
+                            <Button variant="outline" size="sm" onClick={() => setViewPermission(null)}>
+                                Close
+                            </Button>
+                        </div>
+                    </div>
+                )}
+            </Modal>
+
+            <ConfirmationDialog
+                open={deletePermissionId !== null}
+                onOpenChange={(open) => !open && setDeletePermissionId(null)}
+                title="Delete Permission"
+                description="Are you sure you want to delete this permission? Roles using it will lose access."
+                onConfirm={() => { if (deletePermissionId !== null) deletePermission(String(deletePermissionId)); setDeletePermissionId(null); }}
+                confirmLabel="Delete"
+            />
         </div>
     );
 };
@@ -965,6 +1479,10 @@ const PermissionsTab = () => {
 const ProfileTab = () => {
     const { currentUser, updateCurrentUser } = useStore();
     const { register, handleSubmit, formState: { errors } } = useForm({ defaultValues: currentUser });
+    const formatRoleLabel = (name?: string) =>
+        (name ?? '')
+            .replace(/[-_]/g, ' ')
+            .replace(/\b\w/g, (c) => c.toUpperCase());
 
     return (
         <div className="max-w-2xl mx-auto">
@@ -981,7 +1499,7 @@ const ProfileTab = () => {
                         <h3 className="text-xl font-bold text-gray-900">{currentUser.name}</h3>
                         <p className="text-gray-500">{currentUser.email}</p>
                         <span className="inline-block mt-2 px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-medium rounded">
-                            {currentUser.role}
+                            {formatRoleLabel(currentUser.role)}
                         </span>
                     </div>
                 </div>

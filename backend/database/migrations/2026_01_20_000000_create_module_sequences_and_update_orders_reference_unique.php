@@ -21,7 +21,7 @@ return new class extends Migration
         }
 
         Schema::table('orders', function (Blueprint $table) {
-            $table->dropUnique(['reference_number']);
+            $table->dropUnique(['seria_no']);
             $table->unique(['tenant_id', 'transaction_type', 'reference_number'], 'orders_tenant_type_reference_unique');
         });
     }

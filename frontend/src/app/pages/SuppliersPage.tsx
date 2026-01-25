@@ -77,7 +77,7 @@ export const SuppliersPage = () => {
       header: 'Actions', 
       cell: (i: Supplier) => (
         <ActionButtons 
-          onView={() => setViewSupplier(i)}
+          onView={hasPermission('supplier.view') ? () => setViewSupplier(i) : undefined}
           onEdit={hasPermission('supplier.edit') ? () => { setEditing(i); setIsOpen(true); } : undefined} 
           onDelete={hasPermission('supplier.delete') ? () => setDeleteConfirmation(i.id) : undefined} 
         />
@@ -95,6 +95,8 @@ export const SuppliersPage = () => {
         title="Suppliers" 
         onAdd={() => { setEditing(undefined); setIsOpen(true); }} 
         canAdd={hasPermission('supplier.create')} 
+        canSearch={hasPermission('supplier.search')}
+        canExport={hasPermission('supplier.export')}
         defaultSort={{ key: 'created_at', direction: 'desc' }}
       />
       

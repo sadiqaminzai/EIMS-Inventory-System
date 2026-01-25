@@ -4,8 +4,10 @@ export interface User {
   id: number;
   name: string;
   email: string;
-  role: 'admin' | 'manager' | 'staff';
+  role: string;
   permissions: string[];
+  tenant_id?: number;
+  must_change_password?: boolean;
 }
 
 export interface AuthResponse {
@@ -25,6 +27,10 @@ export const authApi = {
 
   getProfile: async () => {
     const response = await apiClient.get<User>('/user');
+    return response.data;
+  },
+  updateProfile: async (data: { name: string; email: string; password?: string; password_confirmation?: string }) => {
+    const response = await apiClient.put('/profile', data);
     return response.data;
   },
 };

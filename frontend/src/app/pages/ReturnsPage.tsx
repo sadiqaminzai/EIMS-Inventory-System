@@ -291,29 +291,40 @@ export const ReturnsPage = () => {
       cell: (i: Return) => (
         <div className="flex items-center gap-1">
           <ActionButtons 
-            onView={() => setViewReturn(i)} 
-            onEdit={hasPermission('return.edit') ? () => handleEdit(i) : undefined}
-            onDelete={hasPermission('return.delete') ? () => handleDelete(i) : undefined}
-            onDownload={() => handleDownload(i)}
+            onView={hasPermission('return_in.view') ? () => setViewReturn(i) : undefined} 
+            onEdit={hasPermission('return_in.edit') ? () => handleEdit(i) : undefined}
+            onDelete={hasPermission('return_in.delete') ? () => handleDelete(i) : undefined}
+            onDownload={hasPermission('return_in.export') ? () => handleDownload(i) : undefined}
           />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" onClick={() => onPrint(i)} className="h-8 w-8 text-gray-600 hover:bg-gray-100" title="Print">
-                <Printer className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Print Return</TooltipContent>
-          </Tooltip>
+          {hasPermission('return_in.print') && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={() => onPrint(i)} className="h-8 w-8 text-gray-600 hover:bg-gray-100" title="Print">
+                  <Printer className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Print Return</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       ) 
     }
   ];
 
-  if (!hasPermission('return.view')) return <div>Access Denied</div>;
+  if (!hasPermission('return_in.view')) return <div>Access Denied</div>;
 
   return (
     <>
-      <DenseTable data={enrichedReturns} columns={columns as any} title="Sales Returns" onAdd={handleAdd} canAdd={hasPermission('return.create')} addLabel="Return" />
+      <DenseTable 
+        data={enrichedReturns} 
+        columns={columns as any} 
+        title="Sales Returns" 
+        onAdd={handleAdd} 
+        canAdd={hasPermission('return_in.create')} 
+        addLabel="Return" 
+        canSearch={hasPermission('return_in.search')}
+        canExport={hasPermission('return_in.export')}
+      />
       
       <Modal
         open={isOpen}

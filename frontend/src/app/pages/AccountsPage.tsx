@@ -506,7 +506,20 @@ export const AccountsPage = () => {
         alert('Update transaction feature is not available in the backend yet.');
     });
 
-    const [activeTab, setActiveTab] = useState<'accounts' | 'transactions'>('transactions');
+    const tabs = [
+        { id: 'transactions' as const, label: 'Transactions', perm: 'account.transactions.view' },
+        { id: 'accounts' as const, label: 'Accounts', perm: 'account.accounts.view' }
+    ];
+    const visibleTabs = tabs.filter((tab) => hasPermission(tab.perm as any));
+    const [activeTab, setActiveTab] = useState<'accounts' | 'transactions'>(
+        (visibleTabs[0]?.id as 'accounts' | 'transactions') || 'transactions'
+    );
+
+    useEffect(() => {
+        if (visibleTabs.length > 0 && !visibleTabs.find((t) => t.id === activeTab)) {
+            setActiveTab(visibleTabs[0].id as 'accounts' | 'transactions');
+        }
+    }, [visibleTabs, activeTab]);
     
     // Account Modals
     const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
@@ -580,6 +593,7 @@ export const AccountsPage = () => {
     };
 
     if (!hasPermission('account.view')) return <div>Access Denied</div>;
+    if (visibleTabs.length === 0) return <div>Access Denied</div>;
 
     // --- Calculations ---
 
@@ -667,9 +681,9 @@ export const AccountsPage = () => {
             width: '120px',
             cell: (item: Account) => (
                 <ActionButtons 
-                    onView={() => { setViewingAccount(item); setIsViewAccountModalOpen(true); }}
-                    onEdit={hasPermission('account.edit') ? () => { setEditingAccount(item); setIsAccountModalOpen(true); } : undefined}
-                    onDelete={hasPermission('account.delete') ? () => { setDeleteId(item.id); setDeleteType('account'); } : undefined}
+                    onView={hasPermission('account.accounts.view') ? () => { setViewingAccount(item); setIsViewAccountModalOpen(true); } : undefined}
+                    onEdit={hasPermission('account.accounts.edit') ? () => { setEditingAccount(item); setIsAccountModalOpen(true); } : undefined}
+                    onDelete={hasPermission('account.accounts.delete') ? () => { setDeleteId(item.id); setDeleteType('account'); } : undefined}
                 />
             )
         }
@@ -773,9 +787,9 @@ export const AccountsPage = () => {
             width: '100px',
             cell: (item: Transaction) => (
                 <ActionButtons 
-                    onView={() => { handleViewTransaction(item); }}
-                    onEdit={hasPermission('account.edit') ? () => { handleEditTransaction(item); } : undefined}
-                    onDelete={hasPermission('account.delete') ? () => { setDeleteId(item.id); setDeleteType('transaction'); } : undefined}
+                    onView={hasPermission('account.transactions.view') ? () => { handleViewTransaction(item); } : undefined}
+                    onEdit={hasPermission('account.transactions.edit') ? () => { handleEditTransaction(item); } : undefined}
+                    onDelete={hasPermission('account.transactions.delete') ? () => { setDeleteId(item.id); setDeleteType('transaction'); } : undefined}
                 />
             )
         }
@@ -807,36 +821,33 @@ export const AccountsPage = () => {
                    
                    <div className="flex gap-2 w-full md:w-auto">
                        <div className="flex bg-gray-100 p-1 rounded-lg">
-                           <button 
-                                onClick={() => setActiveTab('transactions')}
-                                className={clsx("px-3 py-1.5 rounded-md text-sm font-medium transition-all", 
-                                    activeTab === 'transactions' ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-                                )}
-                           >
-                               Transactions
-                           </button>
-                           <button 
-                                onClick={() => setActiveTab('accounts')}
-                                className={clsx("px-3 py-1.5 rounded-md text-sm font-medium transition-all", 
-                                    activeTab === 'accounts' ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-                                )}
-                           >
-                               Accounts
-                           </button>
+                           {visibleTabs.map((tab) => (
+                               <button 
+                                    key={tab.id}
+                                    onClick={() => setActiveTab(tab.id)}
+                                    className={clsx("px-3 py-1.5 rounded-md text-sm font-medium transition-all", 
+                                        activeTab === tab.id ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                                    )}
+                               >
+                                   {tab.label}
+                               </button>
+                           ))}
                        </div>
                        
-                       <Button onClick={() => {
-                           if (activeTab === 'accounts') {
-                               setEditingAccount(undefined);
-                               setIsAccountModalOpen(true);
-                           } else {
-                               setEditingTransaction(undefined);
-                               setIsTransactionModalOpen(true);
-                           }
-                       }} className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1 rounded-full px-4">
-                           <Plus className="h-4 w-4" />
-                           <span>Add</span>
-                       </Button>
+                       {(activeTab === 'accounts' ? hasPermission('account.accounts.create') : hasPermission('account.transactions.create')) && (
+                         <Button onClick={() => {
+                             if (activeTab === 'accounts') {
+                                 setEditingAccount(undefined);
+                                 setIsAccountModalOpen(true);
+                             } else {
+                                 setEditingTransaction(undefined);
+                                 setIsTransactionModalOpen(true);
+                             }
+                         }} className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1 rounded-full px-4">
+                             <Plus className="h-4 w-4" />
+                             <span>Add</span>
+                         </Button>
+                       )}
                    </div>
                 </div>
             </div>
@@ -877,6 +888,8 @@ export const AccountsPage = () => {
                     columns={accountColumns} 
                     title="Accounts"
                     hideHeader
+                    canSearch={hasPermission('account.accounts.search')}
+                    canExport={hasPermission('account.accounts.export')}
                 />
             ) : (
                 <DenseTable 
@@ -884,6 +897,8 @@ export const AccountsPage = () => {
                     columns={transactionColumns as any} 
                     title="Transactions"
                     hideHeader
+                    canSearch={hasPermission('account.transactions.search')}
+                    canExport={hasPermission('account.transactions.export')}
                     defaultSort={{ key: 'created_at', direction: 'desc' }}
                 />
             )}

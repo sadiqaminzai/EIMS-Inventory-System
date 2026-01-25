@@ -11,6 +11,9 @@ trait HasTenant
     protected static function bootHasTenant(): void
     {
         static::addGlobalScope('tenant', function (Builder $builder) {
+            if (TenantContext::shouldIgnoreTenantScope()) {
+                return;
+            }
             $tenantId = TenantContext::getTenantId();
             if ($tenantId !== null) {
                 $builder->where($builder->getModel()->getTable().'.tenant_id', $tenantId);

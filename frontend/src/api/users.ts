@@ -16,13 +16,13 @@ export interface UserDto {
 
 export const userApi = {
   list: async () => (await apiClient.get<UserDto[]>('/users')).data,
-  create: async (data: FormData | { name: string; email: string; password: string; role_id: number; is_active?: boolean }) => {
+  create: async (data: FormData | { name: string; email: string; password: string; role_id?: number; role_name?: string; is_active?: boolean; tenant_id?: string | number }) => {
     if (data instanceof FormData) {
       return (await apiClient.post<UserDto>('/users', data, { headers: { 'Content-Type': 'multipart/form-data' } })).data;
     }
     return (await apiClient.post<UserDto>('/users', data)).data;
   },
-  update: async (id: string, data: FormData | { name: string; email: string; password?: string; role_id: number; is_active?: boolean }) => {
+  update: async (id: string, data: FormData | { name: string; email: string; password?: string; role_id?: number; role_name?: string; is_active?: boolean; tenant_id?: string | number }) => {
     if (data instanceof FormData) {
       if (!data.has('_method')) {
         data.append('_method', 'PUT');

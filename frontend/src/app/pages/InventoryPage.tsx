@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Package, Tag, Globe } from 'lucide-react';
 import { clsx } from 'clsx';
 import { ProductsPage } from './ProductsPage';
@@ -7,14 +7,28 @@ import { CountriesPage } from './CountriesPage';
 import { useStore } from '../../store';
 
 export const InventoryPage = () => {
-    const [activeTab, setActiveTab] = useState<'products' | 'brands' | 'countries'>('products');
     const { hasPermission } = useStore();
 
     const tabs = [
         { id: 'products', label: 'Products', icon: Package, perm: 'product.view' },
-        { id: 'brands', label: 'Brands', icon: Tag, perm: 'product.view' },
-        { id: 'countries', label: 'Countries', icon: Globe, perm: 'product.view' },
+        { id: 'brands', label: 'Brands', icon: Tag, perm: 'brand.view' },
+        { id: 'countries', label: 'Countries', icon: Globe, perm: 'country.view' },
     ];
+
+    const visibleTabs = tabs.filter((tab) => !tab.perm || hasPermission(tab.perm as any));
+    const [activeTab, setActiveTab] = useState<'products' | 'brands' | 'countries'>(
+        (visibleTabs[0]?.id as 'products' | 'brands' | 'countries') || 'products'
+    );
+
+    // Update active tab if current selection becomes invalid
+    useEffect(() => {
+        if (visibleTabs.length > 0 && !visibleTabs.find((t) => t.id === activeTab)) {
+            setActiveTab(visibleTabs[0].id as 'products' | 'brands' | 'countries');
+        }
+    }, [visibleTabs, activeTab]);
+
+    if (!hasPermission('inventory.view')) return <div>Access Denied</div>;
+    if (visibleTabs.length === 0) return <div>Access Denied</div>;
 
     return (
         <div className="flex flex-col h-full space-y-4">

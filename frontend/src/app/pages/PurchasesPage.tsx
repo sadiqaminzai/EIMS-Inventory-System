@@ -312,25 +312,27 @@ export const PurchasesPage = () => {
       cell: (i: Purchase) => (
         <div className="flex items-center gap-1">
           <ActionButtons 
-            onView={() => setViewPurchase(i)} 
+            onView={hasPermission('purchase.view') ? () => setViewPurchase(i) : undefined} 
             onEdit={hasPermission('purchase.edit') ? () => handleEdit(i) : undefined}
             onDelete={hasPermission('purchase.delete') ? () => handleDelete(i) : undefined}
-            onDownload={() => handleDownload(i)} 
+            onDownload={hasPermission('purchase.export') ? () => handleDownload(i) : undefined} 
           />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button 
-                variant="ghost"
-                size="icon"
-                onClick={() => onPrint(i)} 
-                className="h-8 w-8 text-gray-600 hover:bg-gray-100"
-                title="Print Invoice"
-              >
-                <Printer className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Print Invoice</TooltipContent>
-          </Tooltip>
+          {hasPermission('purchase.print') && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button 
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onPrint(i)} 
+                  className="h-8 w-8 text-gray-600 hover:bg-gray-100"
+                  title="Print Invoice"
+                >
+                  <Printer className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Print Invoice</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       ) 
     }
@@ -347,6 +349,8 @@ export const PurchasesPage = () => {
         onAdd={handleAdd} 
         canAdd={hasPermission('purchase.create')} 
         addLabel="Invoice" 
+        canSearch={hasPermission('purchase.search')}
+        canExport={hasPermission('purchase.export')}
       />
       
       <Modal 

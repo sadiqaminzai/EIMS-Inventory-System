@@ -26,6 +26,8 @@ import React, { useState, useEffect } from 'react';
 import { clsx } from 'clsx';
 import { useIsMobile } from '../hooks/use-mobile';
 import { Button } from './components/ui/button';
+import { Modal } from './components/ui/Modal';
+import { DenseInput } from './components/ui/Form';
 import { authApi } from '../api/auth';
 import { toast } from 'sonner';
 
@@ -43,6 +45,11 @@ export const Layout = () => {
   const isMobile = useIsMobile();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [forcePasswordOpen, setForcePasswordOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -64,27 +71,57 @@ export const Layout = () => {
     const token = localStorage.getItem('auth_token');
     if (token) {
       authApi.getProfile().then((profile) => {
-        const roleMap: Record<string, 'Super Admin' | 'Admin' | 'Accountant'> = {
-          superadmin: 'Super Admin',
-          admin: 'Admin',
-          manager: 'Admin',
-          staff: 'Accountant',
-          accountant: 'Accountant',
-        };
-
         updateCurrentUser({
           id: String(profile.id),
           name: profile.name,
           email: profile.email,
-          role: roleMap[(profile as any).role] ?? 'Admin',
-          tenant_id: localStorage.getItem('tenant_id') ?? '1',
+          role: (profile as any).role ?? '',
+          tenant_id: String((profile as any).tenant_id ?? localStorage.getItem('tenant_id') ?? '1'),
           status: 'active',
+          must_change_password: (profile as any).must_change_password ?? false,
         });
       }).catch(() => undefined);
     }
 
     bootstrapData();
   }, [bootstrapData, updateCurrentUser]);
+
+  useEffect(() => {
+    if (currentUser?.must_change_password) {
+      setForcePasswordOpen(true);
+    }
+  }, [currentUser?.must_change_password]);
+
+  const handleForcePasswordSave = async () => {
+    if (!newPassword || newPassword.length < 6) {
+      setPasswordError('Password must be at least 6 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match.');
+      return;
+    }
+
+    setPasswordError('');
+    setIsUpdatingPassword(true);
+    try {
+      await authApi.updateProfile({
+        name: currentUser.name,
+        email: currentUser.email,
+        password: newPassword,
+        password_confirmation: confirmPassword,
+      });
+      updateCurrentUser({ must_change_password: false });
+      setNewPassword('');
+      setConfirmPassword('');
+      setForcePasswordOpen(false);
+      toast.success('Password updated successfully');
+    } catch {
+      toast.error('Failed to update password');
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -183,6 +220,41 @@ export const Layout = () => {
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden font-sans">
+      <Modal
+        open={forcePasswordOpen}
+        onOpenChange={(open) => setForcePasswordOpen(open)}
+        title="Change Your Password"
+        className="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+            Your account is using the default password. Please change it now for security.
+          </div>
+          <DenseInput
+            label="New Password"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+          />
+          <DenseInput
+            label="Confirm Password"
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+          />
+          {passwordError && (
+            <div className="text-xs text-red-600">{passwordError}</div>
+          )}
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+            <Button variant="outline" size="sm" onClick={() => setForcePasswordOpen(false)}>
+              Later
+            </Button>
+            <Button size="sm" onClick={handleForcePasswordSave} disabled={isUpdatingPassword}>
+              {isUpdatingPassword ? 'Saving...' : 'Update Password'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
       {/* Mobile Backdrop */}
       {isMobile && mobileOpen && (
         <div 
@@ -222,17 +294,17 @@ export const Layout = () => {
         </div>
 
         {/* Navigation */}
-        <div className="flex-1 overflow-y-auto py-2 px-2 space-y-0 scrollbar-thin scrollbar-thumb-gray-200">
+        <div className="flex-1 overflow-y-auto py-2 px-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-200">
           <NavItem to="/dashboard" label="Dashboard" icon={LayoutDashboard} />
           
-          <NavItem to="/inventory" label="Inventory" icon={Package} perm="product.view" />
-          <NavItem to="/partners" label="Partners" icon={Users} perm="customer.view" />
+          <NavItem to="/inventory" label="Inventory" icon={Package} perm="inventory.view" />
+          <NavItem to="/partners" label="Partners" icon={Users} perm="partners.view" />
 
-          <SectionHeader label="Operations" shortLabel="OPS" />
-          <NavItem to="/invoices" label="Invoices" icon={TrendingUp} perm="sales.view" />
+          {/* Section labels removed */}
+          <NavItem to="/invoices" label="Invoices" icon={TrendingUp} perm="invoices.view" />
           <NavItem to="/accounts" label="Accounts" icon={Wallet} perm="account.view" />
 
-          <SectionHeader label="System" shortLabel="SYS" />
+          {/* Section labels removed */}
           {/* Reports removed as requested */}
           <NavItem to="/settings" label="Settings" icon={Settings} perm="settings.view" />
         </div>
@@ -254,34 +326,38 @@ export const Layout = () => {
         {/* User Profile */}
         <div className="p-4 border-t border-gray-200 shrink-0">
           <div className="flex items-center gap-3">
-            <img 
-              src={currentUser.avatar} 
-              alt="User" 
-              className="h-8 w-8 rounded-full bg-gray-300" 
-            />
+            {currentUser.avatar ? (
+              <img 
+                src={currentUser.avatar} 
+                alt="User" 
+                className="h-8 w-8 rounded-full bg-gray-300 object-cover" 
+              />
+            ) : (
+              <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-semibold text-gray-600">
+                {(currentUser.name || 'U').charAt(0).toUpperCase()}
+              </div>
+            )}
             {(!collapsed || isMobile) && (
               <div className="flex-1 overflow-hidden">
                 <p className="text-sm font-medium text-gray-900 truncate">{currentUser.name}</p>
                 <p className="text-xs text-gray-500 truncate">{currentUser.role}</p>
               </div>
             )}
-            {(!collapsed || isMobile) && (
-              <button 
-                onClick={() => {
-                  authApi.logout().catch(() => undefined).finally(() => {
-                    localStorage.removeItem('auth_token');
-                    localStorage.removeItem('tenant_id');
-                    localStorage.removeItem('current_user');
-                    toast.success('Logged out');
-                    navigate('/login');
-                  });
-                }}
-                className="text-gray-400 hover:text-red-600 transition-colors"
-                title="Logout"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
-            )}
+            <button 
+              onClick={() => {
+                authApi.logout().catch(() => undefined).finally(() => {
+                  localStorage.removeItem('auth_token');
+                  localStorage.removeItem('tenant_id');
+                  localStorage.removeItem('current_user');
+                  toast.success('Logged out');
+                  navigate('/login');
+                });
+              }}
+              className="text-gray-400 hover:text-red-600 transition-colors"
+              title="Logout"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
         </div>
       </aside>

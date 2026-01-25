@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Users, Building2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { CustomersPage } from './CustomersPage';
@@ -6,13 +6,26 @@ import { SuppliersPage } from './SuppliersPage';
 import { useStore } from '../../store';
 
 export const PartnersPage = () => {
-    const [activeTab, setActiveTab] = useState<'customers' | 'suppliers'>('customers');
     const { hasPermission } = useStore();
 
     const tabs = [
         { id: 'customers', label: 'Customers', icon: Users, perm: 'customer.view' },
         { id: 'suppliers', label: 'Suppliers', icon: Building2, perm: 'supplier.view' },
     ];
+
+    const visibleTabs = tabs.filter((tab) => !tab.perm || hasPermission(tab.perm as any));
+    const [activeTab, setActiveTab] = useState<'customers' | 'suppliers'>(
+        (visibleTabs[0]?.id as 'customers' | 'suppliers') || 'customers'
+    );
+
+    useEffect(() => {
+        if (visibleTabs.length > 0 && !visibleTabs.find((t) => t.id === activeTab)) {
+            setActiveTab(visibleTabs[0].id as 'customers' | 'suppliers');
+        }
+    }, [visibleTabs, activeTab]);
+
+    if (!hasPermission('partners.view')) return <div>Access Denied</div>;
+    if (visibleTabs.length === 0) return <div>Access Denied</div>;
 
     return (
         <div className="flex flex-col h-full space-y-4">

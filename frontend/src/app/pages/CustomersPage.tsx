@@ -77,9 +77,9 @@ export const CustomersPage = () => {
       header: 'Actions', 
       cell: (i: Customer) => (
         <ActionButtons 
-          onView={() => setViewCustomer(i)}
-          onEdit={hasPermission('customer.edit') ? () => { setEditing(i); setIsOpen(true); } : undefined} 
-          onDelete={hasPermission('customer.delete') ? () => setDeleteConfirmation(i.id) : undefined} 
+            onView={hasPermission('customer.view') ? () => setViewCustomer(i) : undefined}
+            onEdit={hasPermission('customer.edit') ? () => { setEditing(i); setIsOpen(true); } : undefined} 
+            onDelete={hasPermission('customer.delete') ? () => setDeleteConfirmation(i.id) : undefined} 
         />
       ) 
     }
@@ -90,6 +90,8 @@ export const CustomersPage = () => {
   return (
     <>
       <DenseTable 
+          canSearch={hasPermission('customer.search')}
+          canExport={hasPermission('customer.export')}
         data={customers} 
         columns={columns} 
         title="Customers" 

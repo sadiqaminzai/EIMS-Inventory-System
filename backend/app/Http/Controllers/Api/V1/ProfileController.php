@@ -23,6 +23,7 @@ class ProfileController extends Controller
 
         if (!empty($data['password'])) {
             $user->password = bcrypt($data['password']);
+            $user->must_change_password = false;
         }
 
         $user->save();

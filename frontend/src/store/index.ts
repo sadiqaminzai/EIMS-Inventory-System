@@ -7,6 +7,7 @@ import { supplierApi } from '../api/suppliers';
 import { customerApi } from '../api/customers';
 import { userApi } from '../api/users';
 import { roleApi } from '../api/roles';
+import { permissionApi } from '../api/permissions';
 import { tenantApi } from '../api/tenants';
 import { accountApi } from '../api/accounts';
 import { accountTransactionApi } from '../api/accountTransactions';
@@ -16,24 +17,9 @@ import { paymentApi } from '../api/payments';
 
 // --- Types ---
 
-export type Role = 'Super Admin' | 'Admin' | 'Accountant';
+export type Role = string;
 
-export type Permission = 
-  | 'product.view' | 'product.create' | 'product.edit' | 'product.delete'
-  | 'supplier.view' | 'supplier.create' | 'supplier.edit' | 'supplier.delete'
-  | 'customer.view' | 'customer.create' | 'customer.edit' | 'customer.delete'
-  | 'purchase.view' | 'purchase.create' | 'purchase.edit' | 'purchase.delete'
-  | 'sales.view' | 'sales.create' | 'sales.edit' | 'sales.delete'
-  | 'return.view' | 'return.create' | 'return.edit' | 'return.delete'
-  | 'expense.view' | 'expense.create' | 'expense.edit' | 'expense.delete'
-  | 'account.view' | 'account.create' | 'account.edit' | 'account.delete'
-  | 'report.view'
-  | 'settings.view' | 'settings.edit'
-  | 'settings.general' | 'settings.print' | 'settings.clients' | 'settings.users' | 'settings.roles' | 'settings.permissions' | 'settings.profile'
-  | 'user.view' | 'user.create' | 'user.edit' | 'user.delete'
-  | 'role.view' | 'role.edit'
-  | 'permission.view' | 'permission.edit'
-  | 'client.view' | 'client.create' | 'client.edit' | 'client.delete';
+export type Permission = string;
 
 export interface User {
   id: string;
@@ -41,8 +27,10 @@ export interface User {
   email: string;
   role: Role;
   tenant_id: string;
+  tenant_name?: string;
   avatar?: string;
   status: 'active' | 'inactive';
+  must_change_password?: boolean;
   created_at?: string;
   updated_at?: string;
   created_by?: string;
@@ -72,6 +60,20 @@ export interface BaseEntity {
   updated_at?: string;
   created_by?: string;
   updated_by?: string;
+}
+
+export interface RoleItem {
+  id: number;
+  name: string;
+  tenant_id?: string;
+  tenant_name?: string;
+  description?: string | null;
+  permissions?: Record<string, boolean> | null;
+}
+
+export interface PermissionItem {
+  id: number;
+  name: string;
 }
 
 export interface Brand extends BaseEntity { id: string; name: string; details?: string; status: 'active' | 'inactive'; }
@@ -268,7 +270,10 @@ interface AppState {
   
   // Master Data
   users: User[]; // List of all users in the tenant
-  rolePermissions: Record<Role, Permission[]>; // Dynamic permissions map
+  roles: RoleItem[]; // List of roles from backend
+  permissions: PermissionItem[]; // List of permissions from backend
+  rolePermissions: Record<string, Permission[]>; // Dynamic permissions map
+  permissionsCatalog: Permission[]; // List of available permissions
   clients: Tenant[]; // List of all tenants (for Super Admin)
   brands: Brand[];
   countries: Country[];
@@ -298,7 +303,15 @@ interface AppState {
   deleteUser: (id: string) => void;
   
   // Role Management
-  updateRolePermissions: (role: Role, permissions: Permission[]) => void;
+  addRole: (data: { name: string; description?: string | null; permissions?: Permission[]; tenant_id?: string }) => void;
+  updateRole: (id: string, data: { name: string; description?: string | null; permissions?: Permission[]; tenant_id?: string }) => void;
+  deleteRole: (id: string) => void;
+  updateRolePermissions: (roleId: string, roleName: string, permissions: Permission[]) => void;
+
+  // Permission Management
+  addPermission: (data: { name: string }) => void;
+  updatePermission: (id: string, data: { name: string }) => void;
+  deletePermission: (id: string) => void;
 
   // Client (Tenant) Management
   addClient: (data: Tenant) => void;
@@ -374,39 +387,14 @@ const INITIAL_USER: User = {
   id: '',
   name: '',
   email: '',
-  role: 'Accountant',
+  role: '',
   tenant_id: '',
   avatar: '',
   status: 'active',
+  must_change_password: false,
 };
 
-const mapRoleFromBackend = (role?: string): Role => {
-  switch (role) {
-    case 'superadmin':
-      return 'Super Admin';
-    case 'admin':
-    case 'manager':
-      return 'Admin';
-    case 'accountant':
-    case 'staff':
-      return 'Accountant';
-    default:
-      return 'Admin';
-  }
-};
-
-const mapRoleToBackend = (role: Role): string => {
-  switch (role) {
-    case 'Super Admin':
-      return 'superadmin';
-    case 'Admin':
-      return 'admin';
-    case 'Accountant':
-      return 'accountant';
-    default:
-      return 'admin';
-  }
-};
+const mapRoleFromBackend = (role?: string): Role => role ?? '';
 
 const resolveAssetUrl = (value?: string | null) => {
   if (!value) return undefined;
@@ -435,54 +423,49 @@ const resolveAssetUrl = (value?: string | null) => {
 };
 
 // --- Permissions Logic ---
-const INITIAL_PERMISSIONS_MAP: Record<Role, Permission[]> = {
-  'Super Admin': [
-    'product.view', 'product.create', 'product.edit', 'product.delete',
-    'supplier.view', 'supplier.create', 'supplier.edit', 'supplier.delete',
-    'customer.view', 'customer.create', 'customer.edit', 'customer.delete',
-    'purchase.view', 'purchase.create', 'purchase.edit', 'purchase.delete',
-    'sales.view', 'sales.create', 'sales.edit', 'sales.delete',
-    'return.view', 'return.create', 'return.edit', 'return.delete',
-    'account.view', 'account.create', 'account.edit', 'account.delete',
-    'report.view', 'settings.view', 'settings.edit',
-    'settings.general', 'settings.print', 'settings.clients', 'settings.users', 'settings.roles', 'settings.permissions', 'settings.profile',
-    'user.view', 'user.create', 'user.edit', 'user.delete',
-    'role.view', 'role.edit',
-    'permission.view', 'permission.edit',
-    'client.view', 'client.create', 'client.edit', 'client.delete'
-  ],
-  'Admin': [
-    'product.view', 'product.create', 'product.edit', 'product.delete',
-    'supplier.view', 'supplier.create', 'supplier.edit', 'supplier.delete',
-    'customer.view', 'customer.create', 'customer.edit', 'customer.delete',
-    'purchase.view', 'purchase.create', 'purchase.edit', 'purchase.delete',
-    'sales.view', 'sales.create', 'sales.edit', 'sales.delete',
-    'return.view', 'return.create', 'return.edit', 'return.delete',
-    'account.view', 'account.create', 'account.edit', 'account.delete',
-    'report.view', 'settings.view', 'settings.edit',
-    'settings.general', 'settings.print', 'settings.clients', 'settings.users', 'settings.profile',
-    'user.view', 'user.create', 'user.edit', 'user.delete',
-    'client.view', 'client.create', 'client.edit', 'client.delete'
-  ],
-  'Accountant': [
-    'product.view', 
-    'supplier.view', 
-    'customer.view', 
-    'purchase.view', 
-    'sales.view', 
-    'return.view', 
-    'account.view',
-    'report.view',
-    'settings.view',
-    'settings.profile'
-  ]
-};
+const INITIAL_PERMISSIONS_MAP: Record<string, Permission[]> = {};
+const DEFAULT_PERMISSIONS: Permission[] = [
+  // Inventory main + sub modules
+  'inventory.view',
+  'partners.view',
+  'invoices.view',
+  'product.view', 'product.create', 'product.edit', 'product.delete', 'product.search', 'product.export', 'product.print',
+  'brand.view', 'brand.create', 'brand.edit', 'brand.delete', 'brand.search', 'brand.export', 'brand.print',
+  'country.view', 'country.create', 'country.edit', 'country.delete', 'country.search', 'country.export', 'country.print',
+
+  // Partners
+  'supplier.view', 'supplier.create', 'supplier.edit', 'supplier.delete', 'supplier.search', 'supplier.export', 'supplier.print',
+  'customer.view', 'customer.create', 'customer.edit', 'customer.delete', 'customer.search', 'customer.export', 'customer.print',
+
+  // Orders & returns
+  'purchase.view', 'purchase.create', 'purchase.edit', 'purchase.delete', 'purchase.search', 'purchase.export', 'purchase.print',
+  'sales.view', 'sales.create', 'sales.edit', 'sales.delete', 'sales.search', 'sales.export', 'sales.print',
+  'return_in.view', 'return_in.create', 'return_in.edit', 'return_in.delete', 'return_in.search', 'return_in.export', 'return_in.print',
+  'return_out.view', 'return_out.create', 'return_out.edit', 'return_out.delete', 'return_out.search', 'return_out.export', 'return_out.print',
+
+  // Accounts
+  'account.view',
+  'account.transactions.view', 'account.transactions.create', 'account.transactions.edit', 'account.transactions.delete', 'account.transactions.search', 'account.transactions.export', 'account.transactions.print',
+  'account.accounts.view', 'account.accounts.create', 'account.accounts.edit', 'account.accounts.delete', 'account.accounts.search', 'account.accounts.export', 'account.accounts.print',
+  'account.transaction.payment', 'account.transaction.income', 'account.transaction.expense', 'account.transaction.transfer',
+  'account.transaction.save', 'account.transaction.cancel',
+
+  // Settings & users
+  'settings.view', 'settings.edit', 'settings.general', 'settings.print', 'settings.clients', 'settings.users', 'settings.roles', 'settings.permissions', 'settings.profile',
+  'user.view', 'user.create', 'user.edit', 'user.delete', 'user.search', 'user.export', 'user.print',
+  'role.view', 'role.create', 'role.edit', 'role.delete', 'role.search', 'role.export', 'role.print',
+  'permission.view', 'permission.edit', 'permission.search', 'permission.export',
+  'client.view', 'client.create', 'client.edit', 'client.delete', 'client.search', 'client.export', 'client.print',
+];
 
 export const useStore = create<AppState>((set, get) => ({
   currentUser: INITIAL_USER,
   tenant: INITIAL_TENANT,
   users: [],
+  roles: [],
+  permissions: [],
   rolePermissions: INITIAL_PERMISSIONS_MAP,
+  permissionsCatalog: [],
   clients: [],
   brands: [],
   countries: [],
@@ -512,33 +495,6 @@ export const useStore = create<AppState>((set, get) => ({
       return { currentUser: nextUser };
     });
   },
-  updateTenant: async (data) => {
-    try {
-      let updated;
-      const logoFile = (data as any).logo_file as any;
-      const resolvedLogo = logoFile instanceof File ? logoFile : undefined;
-      if (resolvedLogo) {
-        const form = new FormData();
-        form.append('name', data.name ?? '');
-        if (data.phone) form.append('phone', data.phone);
-        if (data.email) form.append('email', data.email);
-        if (data.website) form.append('website', data.website);
-        if (data.address) form.append('address', data.address);
-        form.append('logo', resolvedLogo);
-        updated = await settingsApi.updateTenantProfile(form as any);
-      } else {
-        const payload = { ...data } as any;
-        if (typeof payload.logo === 'string') {
-          delete payload.logo;
-        }
-        updated = await settingsApi.updateTenantProfile(payload);
-      }
-      toast.info('Company settings updated');
-      set((state) => ({ tenant: { ...state.tenant, ...updated, id: String(updated.id ?? state.tenant.id) } }));
-    } catch {
-      toast.error('Failed to update company settings');
-    }
-  },
   updatePrintSettings: async (data) => {
     try {
       const updated = await settingsApi.updatePrintSettings(data as any);
@@ -550,7 +506,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
   bootstrapData: async () => {
     try {
-      const [tenant, printSettings, brands, countries, products, suppliers, customers, users, _roles, clients, accounts, transactions, purchases, sales, returns, returnOuts] = await Promise.all([
+      const requests = [
         settingsApi.getTenantProfile(),
         settingsApi.getPrintSettings(),
         brandApi.list(),
@@ -560,6 +516,7 @@ export const useStore = create<AppState>((set, get) => ({
         customerApi.list(),
         userApi.list(),
         roleApi.list(),
+        permissionApi.list(),
         tenantApi.list(),
         accountApi.list(),
         accountTransactionApi.list(),
@@ -567,7 +524,57 @@ export const useStore = create<AppState>((set, get) => ({
         transactionApi.getHistory({ type: 'sale' }),
         transactionApi.getHistory({ type: 'return_in' }),
         transactionApi.getHistory({ type: 'return_out' }),
-      ]);
+      ];
+
+      const labels = [
+        'Tenant Profile',
+        'Print Settings',
+        'Brands',
+        'Countries',
+        'Products',
+        'Suppliers',
+        'Customers',
+        'Users',
+        'Roles',
+        'Permissions',
+        'Clients',
+        'Accounts',
+        'Transactions',
+        'Purchases',
+        'Sales',
+        'Returns (In)',
+        'Returns (Out)',
+      ];
+
+      const results = await Promise.allSettled(requests);
+
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          console.error(`Failed to load ${labels[index]}`, result.reason);
+          toast.error(`Failed to load ${labels[index]}`);
+        }
+      });
+
+      const unwrap = <T>(index: number, fallback: T): T =>
+        results[index]?.status === 'fulfilled' ? (results[index] as PromiseFulfilledResult<T>).value : fallback;
+
+      const tenant = unwrap(0, INITIAL_TENANT as any);
+      const printSettings = unwrap(1, {} as any);
+      const brands = unwrap(2, [] as any[]);
+      const countries = unwrap(3, [] as any[]);
+      const products = unwrap(4, [] as any);
+      const suppliers = unwrap(5, [] as any[]);
+      const customers = unwrap(6, [] as any[]);
+      const users = unwrap(7, [] as any[]);
+      const _roles = unwrap(8, [] as any[]);
+      const _permissions = unwrap(9, [] as any[]);
+      const clients = unwrap(10, [] as any[]);
+      const accounts = unwrap(11, [] as any[]);
+      const transactions = unwrap(12, [] as any[]);
+      const purchases = unwrap(13, [] as any);
+      const sales = unwrap(14, [] as any);
+      const returns = unwrap(15, [] as any);
+      const returnOuts = unwrap(16, [] as any);
 
       const productList = Array.isArray(products?.data) ? products.data : (products?.data?.data ?? products?.data ?? products);
       const purchaseOrders = Array.isArray(purchases?.data) ? purchases.data : (purchases?.data?.data ?? purchases?.data ?? purchases);
@@ -579,6 +586,10 @@ export const useStore = create<AppState>((set, get) => ({
       users.forEach((u) => {
         userMap.set(String(u.id), u.name);
       });
+      const tenantMap = new Map<string, string>();
+      clients.forEach((t) => {
+        tenantMap.set(String(t.id), t.name ?? '');
+      });
       const resolveUser = (id?: number | string | null) => {
         if (!id) return 'System';
         return userMap.get(String(id)) ?? `User #${id}`;
@@ -587,6 +598,45 @@ export const useStore = create<AppState>((set, get) => ({
         if (!value) return '';
         return value.slice(0, 10);
       };
+
+      const roleList: RoleItem[] = (_roles ?? []).map((r: any) => ({
+        id: Number(r.id),
+        name: r.name,
+        tenant_id: r.tenant_id !== undefined && r.tenant_id !== null ? String(r.tenant_id) : undefined,
+        tenant_name: (r.tenant_name ?? tenantMap.get(String(r.tenant_id ?? '')) ?? ''),
+        description: r.description ?? null,
+        permissions: r.permissions ?? null,
+      }));
+
+      const rolePermissions: Record<string, Permission[]> = roleList.reduce((acc, role) => {
+        const permsSource = role.permissions ?? {};
+        const perms = Array.isArray(permsSource)
+          ? permsSource
+          : Object.entries(permsSource)
+              .filter(([, enabled]) => Boolean(enabled))
+              .map(([key]) => key);
+        acc[role.name] = perms as Permission[];
+        return acc;
+      }, {} as Record<string, Permission[]>);
+
+      const permissionsList = (_permissions ?? []).map((p: any) => ({
+        id: Number(p.id),
+        name: String(p.name ?? ''),
+      })).filter((p: any) => p.name);
+
+      const permissionsCatalog = Array.from(
+        new Set([
+          ...DEFAULT_PERMISSIONS,
+          ...permissionsList.map((p) => p.name),
+          ...roleList.flatMap((role) =>
+            Array.isArray(role.permissions)
+              ? role.permissions
+              : Object.keys(role.permissions ?? {})
+          )
+        ])
+      )
+        .filter((perm) => !String(perm).startsWith('manage_')) as Permission[];
+
       set(() => ({
         tenant: {
           ...INITIAL_TENANT,
@@ -595,7 +645,7 @@ export const useStore = create<AppState>((set, get) => ({
           id: String(tenant.id ?? ''),
         },
         printSettings: printSettings as any,
-        brands: brands.map((b) => ({
+        brands: (Array.isArray(brands) ? brands : []).map((b) => ({
           id: String(b.id),
           name: b.name,
           details: b.details ?? undefined,
@@ -605,7 +655,7 @@ export const useStore = create<AppState>((set, get) => ({
           created_by: resolveUser((b as any).created_by),
           updated_by: resolveUser((b as any).updated_by),
         })),
-        countries: countries.map((c) => ({
+        countries: (Array.isArray(countries) ? countries : []).map((c) => ({
           id: String(c.id),
           name: c.name,
           details: c.details ?? undefined,
@@ -632,7 +682,7 @@ export const useStore = create<AppState>((set, get) => ({
           created_by: resolveUser(p.created_by),
           updated_by: resolveUser(p.updated_by),
         })),
-        suppliers: suppliers.map((s) => ({
+        suppliers: (Array.isArray(suppliers) ? suppliers : []).map((s) => ({
           id: String(s.id),
           name: s.name,
           email: s.email,
@@ -644,7 +694,7 @@ export const useStore = create<AppState>((set, get) => ({
           created_by: resolveUser((s as any).created_by),
           updated_by: resolveUser((s as any).updated_by),
         })),
-        customers: customers.map((c) => ({
+        customers: (Array.isArray(customers) ? customers : []).map((c) => ({
           id: String(c.id),
           name: c.name,
           email: c.email,
@@ -656,12 +706,13 @@ export const useStore = create<AppState>((set, get) => ({
           created_by: resolveUser((c as any).created_by),
           updated_by: resolveUser((c as any).updated_by),
         })),
-        users: users.map((u) => ({
+        users: (Array.isArray(users) ? users : []).map((u) => ({
           id: String(u.id),
           name: u.name,
           email: u.email,
           role: mapRoleFromBackend(u.role?.name),
           tenant_id: String((u as any).tenant_id ?? ''),
+          tenant_name: tenantMap.get(String((u as any).tenant_id ?? '')) ?? '',
           avatar: resolveAssetUrl((u as any).avatar) ?? '',
           status: u.is_active ? 'active' : 'inactive',
           created_at: (u as any).created_at,
@@ -669,7 +720,11 @@ export const useStore = create<AppState>((set, get) => ({
           created_by: resolveUser((u as any).created_by),
           updated_by: resolveUser((u as any).updated_by),
         })),
-        clients: clients.map((t) => ({
+        roles: roleList,
+        permissions: permissionsList,
+        rolePermissions,
+        permissionsCatalog,
+        clients: (Array.isArray(clients) ? clients : []).map((t) => ({
           id: String(t.id),
           name: t.name,
           logo: resolveAssetUrl(t.logo) ?? '',
@@ -685,7 +740,7 @@ export const useStore = create<AppState>((set, get) => ({
           max_users: t.max_users ?? 0,
           license_status: (t.license_status ?? 'Active') as any,
         })),
-        accounts: accounts.map((a) => ({
+        accounts: (Array.isArray(accounts) ? accounts : []).map((a) => ({
           id: String(a.id),
           name: a.name,
           type: a.type as any,
@@ -698,7 +753,7 @@ export const useStore = create<AppState>((set, get) => ({
           created_by: resolveUser((a as any).created_by),
           updated_by: resolveUser((a as any).updated_by),
         })),
-        transactions: transactions.map((t) => ({
+        transactions: (Array.isArray(transactions) ? transactions : []).map((t) => ({
           id: String(t.id),
           date: t.date,
           type: t.type as any,
@@ -902,9 +957,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   addUser: async (data) => {
     try {
-      const roles = await roleApi.list();
-      const backendName = mapRoleToBackend(data.role as any);
-      const role = roles.find((r) => r.name === backendName) ?? roles[0];
+      const roleName = (data.role as string) ?? '';
 
       let created;
       const avatarFile = (data as any).avatar_file as File | undefined;
@@ -913,8 +966,9 @@ export const useStore = create<AppState>((set, get) => ({
         form.append('name', data.name ?? '');
         form.append('email', data.email ?? '');
         form.append('password', (data as any).password || 'password');
-        form.append('role_id', String(role?.id));
+        form.append('role_name', roleName);
         form.append('is_active', data.status !== 'inactive' ? '1' : '0');
+        if ((data as any).tenant_id) form.append('tenant_id', String((data as any).tenant_id));
         form.append('avatar', avatarFile);
         created = await userApi.create(form as any);
       } else {
@@ -922,8 +976,9 @@ export const useStore = create<AppState>((set, get) => ({
           name: data.name,
           email: data.email,
           password: (data as any).password || 'password',
-          role_id: role?.id,
+          role_name: roleName,
           is_active: data.status !== 'inactive',
+          tenant_id: (data as any).tenant_id,
         });
       }
 
@@ -934,20 +989,20 @@ export const useStore = create<AppState>((set, get) => ({
           name: created.name,
           email: created.email,
           role: mapRoleFromBackend(created.role?.name),
-          tenant_id: state.tenant.id,
-          avatar: resolveAsset((created as any).avatar) ?? '',
+          tenant_id: String((created as any).tenant_id ?? (data as any).tenant_id ?? state.tenant.id),
+          tenant_name: state.clients.find((t) => String(t.id) === String((created as any).tenant_id ?? (data as any).tenant_id ?? state.tenant.id))?.name ?? state.tenant.name,
+          avatar: resolveAssetUrl((created as any).avatar) ?? '',
           status: created.is_active ? 'active' : 'inactive',
         }]
       }));
-    } catch {
-      toast.error('Failed to add user');
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Failed to add user';
+      toast.error(String(msg));
     }
   },
   updateUser: async (id, data) => {
     try {
-      const roles = await roleApi.list();
-      const backendName = mapRoleToBackend((data.role as any) ?? 'Admin');
-      const role = roles.find((r) => r.name === backendName) ?? roles[0];
+      const roleName = (data.role as string) ?? '';
 
       let updated;
       const avatarFile = (data as any).avatar_file as File | undefined;
@@ -956,8 +1011,9 @@ export const useStore = create<AppState>((set, get) => ({
         form.append('name', data.name ?? '');
         form.append('email', data.email ?? '');
         if ((data as any).password) form.append('password', (data as any).password);
-        form.append('role_id', String(role?.id));
+        form.append('role_name', roleName);
         form.append('is_active', data.status !== 'inactive' ? '1' : '0');
+        if ((data as any).tenant_id) form.append('tenant_id', String((data as any).tenant_id));
         form.append('avatar', avatarFile);
         form.append('_method', 'PUT');
         updated = await userApi.update(id, form as any);
@@ -966,8 +1022,9 @@ export const useStore = create<AppState>((set, get) => ({
           name: data.name ?? '',
           email: data.email ?? '',
           password: (data as any).password || undefined,
-          role_id: role?.id,
+          role_name: roleName,
           is_active: data.status !== 'inactive',
+          tenant_id: (data as any).tenant_id,
         });
       }
 
@@ -979,7 +1036,7 @@ export const useStore = create<AppState>((set, get) => ({
           email: updated.email,
           role: mapRoleFromBackend(updated.role?.name),
           status: updated.is_active ? 'active' : 'inactive',
-          avatar: resolveAsset((updated as any).avatar) ?? '',
+          avatar: resolveAssetUrl((updated as any).avatar) ?? '',
         } : u)
       }));
     } catch {
@@ -996,20 +1053,90 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  updateRolePermissions: async (role, permissions) => {
+  addRole: async (data) => {
     try {
-      const roles = await roleApi.list();
-      const backendName = mapRoleToBackend(role);
-      const target = roles.find((r) => r.name === backendName);
-      if (target) {
-        const perms: Record<string, boolean> = {};
-        permissions.forEach((p) => { perms[p] = true; });
-        await roleApi.update(String(target.id), { permissions: perms });
-      }
-      toast.info(`${role} permissions updated`);
-      set((state) => ({ rolePermissions: { ...state.rolePermissions, [role]: permissions } }));
+      const perms: Record<string, boolean> = {};
+      (data.permissions ?? []).forEach((p) => { perms[p] = true; });
+      await roleApi.create({
+        name: data.name,
+        description: data.description ?? null,
+        permissions: perms,
+        tenant_id: data.tenant_id,
+      });
+      toast.success('Role added successfully');
+      await get().bootstrapData();
+    } catch {
+      toast.error('Failed to add role');
+    }
+  },
+  updateRole: async (id, data) => {
+    try {
+      const perms: Record<string, boolean> = {};
+      (data.permissions ?? []).forEach((p) => { perms[p] = true; });
+      await roleApi.update(id, {
+        name: data.name,
+        description: data.description ?? null,
+        permissions: perms,
+        tenant_id: data.tenant_id,
+      });
+      toast.info('Role updated successfully');
+      await get().bootstrapData();
+    } catch {
+      toast.error('Failed to update role');
+    }
+  },
+  deleteRole: async (id) => {
+    try {
+      await roleApi.remove(id);
+      toast.error('Role deleted successfully');
+      await get().bootstrapData();
+    } catch {
+      toast.error('Failed to delete role');
+    }
+  },
+
+  updateRolePermissions: async (roleId, roleName, permissions) => {
+    try {
+      const perms: Record<string, boolean> = {};
+      permissions.forEach((p) => { perms[p] = true; });
+      const role = get().roles.find((r) => String(r.id) === String(roleId)) || get().roles.find((r) => r.name === roleName);
+      await roleApi.update(String(roleId), {
+        name: role?.name ?? roleName,
+        description: role?.description ?? null,
+        permissions: perms,
+      });
+      toast.info(`${roleName} permissions updated`);
+      await get().bootstrapData();
     } catch {
       toast.error('Failed to update role permissions');
+    }
+  },
+
+  addPermission: async (data) => {
+    try {
+      await permissionApi.create({ name: data.name });
+      toast.success('Permission added successfully');
+      await get().bootstrapData();
+    } catch {
+      toast.error('Failed to add permission');
+    }
+  },
+  updatePermission: async (id, data) => {
+    try {
+      await permissionApi.update(id, { name: data.name });
+      toast.info('Permission updated successfully');
+      await get().bootstrapData();
+    } catch {
+      toast.error('Failed to update permission');
+    }
+  },
+  deletePermission: async (id) => {
+    try {
+      await permissionApi.remove(id);
+      toast.error('Permission deleted successfully');
+      await get().bootstrapData();
+    } catch {
+      toast.error('Failed to delete permission');
     }
   },
 
@@ -1726,7 +1853,137 @@ export const useStore = create<AppState>((set, get) => ({
 
   hasPermission: (perm) => {
     const role = get().currentUser.role;
-    // Use the dynamic map from state instead of the static const
-    return get().rolePermissions[role]?.includes(perm) || false;
+    const aliases: Record<string, string> = {
+      'product.view': 'manage_products',
+      'product.create': 'manage_products',
+      'product.edit': 'manage_products',
+      'product.delete': 'manage_products',
+      'product.search': 'manage_products',
+      'product.export': 'manage_products',
+      'product.print': 'manage_products',
+      'brand.view': 'manage_products',
+      'brand.create': 'manage_products',
+      'brand.edit': 'manage_products',
+      'brand.delete': 'manage_products',
+      'brand.search': 'manage_products',
+      'brand.export': 'manage_products',
+      'brand.print': 'manage_products',
+      'country.view': 'manage_products',
+      'country.create': 'manage_products',
+      'country.edit': 'manage_products',
+      'country.delete': 'manage_products',
+      'country.search': 'manage_products',
+      'country.export': 'manage_products',
+      'country.print': 'manage_products',
+      'inventory.view': 'manage_products',
+      'partners.view': 'manage_inventory',
+      'invoices.view': 'manage_orders',
+      'supplier.view': 'manage_inventory',
+      'supplier.create': 'manage_inventory',
+      'supplier.edit': 'manage_inventory',
+      'supplier.delete': 'manage_inventory',
+      'supplier.search': 'manage_inventory',
+      'supplier.export': 'manage_inventory',
+      'supplier.print': 'manage_inventory',
+      'customer.view': 'manage_inventory',
+      'customer.create': 'manage_inventory',
+      'customer.edit': 'manage_inventory',
+      'customer.delete': 'manage_inventory',
+      'customer.search': 'manage_inventory',
+      'customer.export': 'manage_inventory',
+      'customer.print': 'manage_inventory',
+      'purchase.view': 'manage_inventory',
+      'purchase.create': 'manage_inventory',
+      'purchase.edit': 'manage_inventory',
+      'purchase.delete': 'manage_inventory',
+      'purchase.search': 'manage_inventory',
+      'purchase.export': 'manage_inventory',
+      'purchase.print': 'manage_inventory',
+      'sales.view': 'manage_orders',
+      'sales.create': 'manage_orders',
+      'sales.edit': 'manage_orders',
+      'sales.delete': 'manage_orders',
+      'sales.search': 'manage_orders',
+      'sales.export': 'manage_orders',
+      'sales.print': 'manage_orders',
+      'return.view': 'manage_orders',
+      'return.create': 'manage_orders',
+      'return.edit': 'manage_orders',
+      'return.delete': 'manage_orders',
+      'return.search': 'manage_orders',
+      'return.export': 'manage_orders',
+      'return.print': 'manage_orders',
+      'return_in.view': 'manage_orders',
+      'return_in.create': 'manage_orders',
+      'return_in.edit': 'manage_orders',
+      'return_in.delete': 'manage_orders',
+      'return_in.search': 'manage_orders',
+      'return_in.export': 'manage_orders',
+      'return_in.print': 'manage_orders',
+      'return_out.view': 'manage_orders',
+      'return_out.create': 'manage_orders',
+      'return_out.edit': 'manage_orders',
+      'return_out.delete': 'manage_orders',
+      'return_out.search': 'manage_orders',
+      'return_out.export': 'manage_orders',
+      'return_out.print': 'manage_orders',
+      'account.view': 'manage_orders',
+      'account.transactions.view': 'manage_orders',
+      'account.transactions.create': 'manage_orders',
+      'account.transactions.edit': 'manage_orders',
+      'account.transactions.delete': 'manage_orders',
+      'account.transactions.search': 'manage_orders',
+      'account.transactions.export': 'manage_orders',
+      'account.transactions.print': 'manage_orders',
+      'account.accounts.view': 'manage_orders',
+      'account.accounts.create': 'manage_orders',
+      'account.accounts.edit': 'manage_orders',
+      'account.accounts.delete': 'manage_orders',
+      'account.accounts.search': 'manage_orders',
+      'account.accounts.export': 'manage_orders',
+      'account.accounts.print': 'manage_orders',
+      'account.transaction.payment': 'manage_orders',
+      'account.transaction.income': 'manage_orders',
+      'account.transaction.expense': 'manage_orders',
+      'account.transaction.transfer': 'manage_orders',
+      'account.transaction.save': 'manage_orders',
+      'account.transaction.cancel': 'manage_orders',
+      'settings.view': 'manage_users',
+      'settings.edit': 'manage_users',
+      'settings.general': 'manage_users',
+      'settings.print': 'manage_users',
+      'settings.clients': 'manage_users',
+      'settings.users': 'manage_users',
+      'settings.roles': 'manage_users',
+      'settings.permissions': 'manage_users',
+      'settings.profile': 'manage_users',
+      'user.view': 'manage_users',
+      'user.create': 'manage_users',
+      'user.edit': 'manage_users',
+      'user.delete': 'manage_users',
+      'user.search': 'manage_users',
+      'user.export': 'manage_users',
+      'user.print': 'manage_users',
+      'role.view': 'manage_users',
+      'role.create': 'manage_users',
+      'role.edit': 'manage_users',
+      'role.delete': 'manage_users',
+      'role.search': 'manage_users',
+      'role.export': 'manage_users',
+      'role.print': 'manage_users',
+      'permission.view': 'manage_users',
+      'permission.edit': 'manage_users',
+      'permission.search': 'manage_users',
+      'permission.export': 'manage_users',
+      'client.view': 'manage_users',
+      'client.create': 'manage_users',
+      'client.edit': 'manage_users',
+      'client.delete': 'manage_users',
+      'client.search': 'manage_users',
+      'client.export': 'manage_users',
+      'client.print': 'manage_users',
+    };
+    const normalized = aliases[perm] ?? perm;
+    return get().rolePermissions[role]?.includes(normalized) || false;
   }
 }));

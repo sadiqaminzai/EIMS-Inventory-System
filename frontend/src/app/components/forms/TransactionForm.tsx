@@ -13,7 +13,7 @@ export const TransactionForm = ({ initialData, paymentData, onSave, onCancel }: 
     const store = useStore ? useStore() : null;
     if (!store) return <div className="p-4 text-center text-gray-500">Loading form...</div>;
 
-    const { accounts, customers, sales, returns, currentUser } = store;
+    const { accounts, customers, sales, returns, currentUser, hasPermission } = store;
     const [nextSerial, setNextSerial] = useState<string>('');
     const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
     const didAutoFocus = useRef(false);
@@ -55,7 +55,24 @@ export const TransactionForm = ({ initialData, paymentData, onSave, onCancel }: 
     });
 
     const type = watch('type');
+    const typePermissions: Record<string, string> = {
+        Payment: 'account.transaction.payment',
+        Income: 'account.transaction.income',
+        Expense: 'account.transaction.expense',
+        Transfer: 'account.transaction.transfer'
+    };
+    const allowedTypes = ['Payment', 'Income', 'Expense', 'Transfer']
+        .filter((t) => hasPermission?.(typePermissions[t] as any));
     const showPaymentMode = type === 'Payment' && (!initialData || isPaymentEdit);
+
+    // Ensure type is permitted (new transactions only)
+    useEffect(() => {
+        if (initialData || isPaymentEdit) return;
+        if (type && !allowedTypes.includes(type)) {
+            const fallback = allowedTypes[0] || 'Payment';
+            setValue('type', fallback as any);
+        }
+    }, [allowedTypes, type, initialData, isPaymentEdit, setValue]);
 
     // Update currency when type changes (only for new transactions or if user changes type)
     useEffect(() => {
@@ -239,24 +256,28 @@ export const TransactionForm = ({ initialData, paymentData, onSave, onCancel }: 
                     <DenseInput label="Date" type="date" {...register('date', { required: true })} className="w-40" />
                 </div>
                 <div className="flex gap-3 flex-wrap justify-end w-full md:w-auto">
-                    {['Payment', 'Income', 'Expense', 'Transfer'].map(t => (
-                        <label key={t} className="flex items-center gap-2 cursor-pointer">
-                            <input 
-                                type="radio" 
-                                value={t} 
-                                {...register('type')} 
-                                className="text-blue-600 focus:ring-blue-500"
-                            />
-                            <span className={clsx(
-                                "text-sm font-medium px-3 py-1 rounded-full",
-                                type === t && t === 'Payment' ? "bg-emerald-100 text-emerald-800" :
-                                type === t && t === 'Income' ? "bg-green-100 text-green-800" :
-                                type === t && t === 'Expense' ? "bg-red-100 text-red-800" :
-                                type === t && t === 'Transfer' ? "bg-blue-100 text-blue-800" :
-                                "bg-gray-100 text-gray-600"
-                            )}>{t}</span>
-                        </label>
-                    ))}
+                    {['Payment', 'Income', 'Expense', 'Transfer'].map(t => {
+                        const allowed = hasPermission?.(typePermissions[t] as any);
+                        return (
+                            <label key={t} className={clsx("flex items-center gap-2", allowed ? "cursor-pointer" : "cursor-not-allowed opacity-40")}> 
+                                <input 
+                                    type="radio" 
+                                    value={t} 
+                                    {...register('type')} 
+                                    disabled={!allowed}
+                                    className="text-blue-600 focus:ring-blue-500"
+                                />
+                                <span className={clsx(
+                                    "text-sm font-medium px-3 py-1 rounded-full",
+                                    type === t && t === 'Payment' ? "bg-emerald-100 text-emerald-800" :
+                                    type === t && t === 'Income' ? "bg-green-100 text-green-800" :
+                                    type === t && t === 'Expense' ? "bg-red-100 text-red-800" :
+                                    type === t && t === 'Transfer' ? "bg-blue-100 text-blue-800" :
+                                    "bg-gray-100 text-gray-600"
+                                )}>{t}</span>
+                            </label>
+                        );
+                    })}
                 </div>
             </div>
 
@@ -450,10 +471,22 @@ export const TransactionForm = ({ initialData, paymentData, onSave, onCancel }: 
             )}
 
             <div className="flex justify-end gap-2 pt-4 border-t border-gray-100 mt-4">
-                <Button type="button" variant="outline" onClick={onCancel} size="sm" className="gap-2">
+                <Button 
+                    type="button" 
+                    variant="outline" 
+                    onClick={onCancel} 
+                    size="sm" 
+                    className="gap-2"
+                    disabled={!hasPermission?.('account.transaction.cancel' as any)}
+                >
                     <X size={14} /> Cancel
                 </Button>
-                <Button type="submit" size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2">
+                <Button 
+                    type="submit" 
+                    size="sm" 
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+                    disabled={!hasPermission?.('account.transaction.save' as any)}
+                >
                     <Save size={14} /> Save
                 </Button>
             </div>

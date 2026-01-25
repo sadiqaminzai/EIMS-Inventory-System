@@ -4,22 +4,25 @@ namespace App\Models;
 
 use App\Models\Concerns\HasTenant;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
+use Spatie\Permission\Models\Role as SpatieRole;
 
-class Role extends Model
+class Role extends SpatieRole
 {
     use HasFactory, HasTenant;
+
+    protected string $guard_name = 'web';
 
     protected $fillable = [
         'tenant_id',
         'name',
         'description',
-        'permissions',
+        'guard_name',
         'created_by',
         'updated_by',
     ];
 
-    protected $casts = [
-        'permissions' => 'array',
-    ];
+    public function tenant()
+    {
+        return $this->belongsTo(Tenant::class);
+    }
 }

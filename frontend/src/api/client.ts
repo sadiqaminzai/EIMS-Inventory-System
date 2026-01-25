@@ -37,8 +37,13 @@ apiClient.interceptors.response.use(
   (error) => {
     // Handle standard Laravel error responses (401, 422, 500)
     if (error.response && error.response.status === 401) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('tenant_id');
+      localStorage.removeItem('current_user');
       // Redirect to login if unauthorized
-      window.location.href = '/login';
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }

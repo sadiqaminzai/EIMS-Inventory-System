@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -17,7 +18,10 @@ class AuthController extends Controller
             'tenant_id' => ['nullable', 'integer'],
         ]);
 
-        $tenantId = $data['tenant_id'] ?? 1;
+        $tenantId = $data['tenant_id'] ?? Tenant::query()->value('id');
+        if (!$tenantId) {
+            return response()->json(['message' => 'No tenant configured'], 422);
+        }
 
         $user = User::query()
             ->where('tenant_id', $tenantId)
@@ -52,15 +56,17 @@ class AuthController extends Controller
 
     protected function transformUser(User $user): array
     {
-        $role = $user->role;
-        $permissions = array_keys(array_filter($role?->permissions ?? [], fn ($value) => $value === true));
+        $roleName = $user->getRoleNames()->first();
+        $permissions = $user->getAllPermissions()->pluck('name')->values()->all();
 
         return [
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
-            'role' => $role?->name,
+            'role' => $roleName,
             'permissions' => $permissions,
+            'tenant_id' => $user->tenant_id,
+            'must_change_password' => (bool) $user->must_change_password,
         ];
     }
 }

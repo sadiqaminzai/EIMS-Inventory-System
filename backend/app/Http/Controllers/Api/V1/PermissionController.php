@@ -1,49 +1,18 @@
 <?php
 
-namespace Database\Seeders;
+namespace App\Http\Controllers\Api\V1;
 
-use App\Models\Role;
-use App\Models\Tenant;
-use App\Models\User;
-use App\Support\TenantContext;
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
-use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\DB;
 
-class DatabaseSeeder extends Seeder
+class PermissionController extends Controller
 {
-    use WithoutModelEvents;
-
-    /**
-     * Seed the application's database.
-     */
-    public function run(): void
+    public function index()
     {
-        TenantContext::setIgnoreTenantScope(true);
-        $tenant = Tenant::firstOrCreate([
-            'slug' => 'default',
-        ], [
-            'name' => 'Default Tenant',
-            'is_active' => true,
-        ]);
-
-        app(PermissionRegistrar::class)->forgetCachedPermissions();
-
-        DB::table('model_has_permissions')->delete();
-        DB::table('model_has_roles')->delete();
-        DB::table('role_has_permissions')->delete();
-        Permission::query()->delete();
-        Role::query()->delete();
-        User::query()->delete();
-
-        $permissions = [
-            'manage_products',
-            'manage_inventory',
-            'manage_orders',
-            'manage_users',
+        $defaults = [
             'inventory.view',
             'partners.view',
             'invoices.view',
@@ -69,30 +38,52 @@ class DatabaseSeeder extends Seeder
             'client.view', 'client.create', 'client.edit', 'client.delete', 'client.search', 'client.export', 'client.print',
         ];
 
-        $permissionModels = collect($permissions)
-            ->map(fn ($name) => Permission::findOrCreate($name, 'web'));
+        foreach ($defaults as $name) {
+            Permission::findOrCreate($name, 'web');
+        }
 
-        $superAdminRole = Role::firstOrCreate([
-            'tenant_id' => $tenant->id,
-            'name' => 'superadmin',
-        ], [
-            'description' => 'Super Administrator',
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        return Permission::query()->orderBy('name')->get();
+    }
+
+    public function store(Request $request)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255', Rule::unique('permissions', 'name')],
+        ]);
+
+        $permission = Permission::create([
+            'name' => $data['name'],
             'guard_name' => 'web',
         ]);
-        app(PermissionRegistrar::class)->setPermissionsTeamId($tenant->id);
-        $superAdminRole->syncPermissions($permissionModels);
 
-        $superAdmin = User::updateOrCreate([
-            'tenant_id' => $tenant->id,
-            'email' => 'superadmin@example.com',
-        ], [
-            'name' => 'Super Admin',
-            'password' => Hash::make('password'),
-            'must_change_password' => true,
-            'role_id' => $superAdminRole->id,
-            'is_active' => true,
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        return response()->json($permission, 201);
+    }
+
+    public function update(Request $request, Permission $permission)
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255', Rule::unique('permissions', 'name')->ignore($permission->id)],
         ]);
-        app(PermissionRegistrar::class)->setPermissionsTeamId($tenant->id);
-        $superAdmin->syncRoles([$superAdminRole]);
+
+        $permission->update([
+            'name' => $data['name'],
+        ]);
+
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        return response()->json($permission);
+    }
+
+    public function destroy(Permission $permission)
+    {
+        $permission->delete();
+
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        return response()->json(['message' => 'Deleted']);
     }
 }
