@@ -51,4 +51,37 @@ class ModuleSequenceService
 
         return $next;
     }
+
+    public function decrement(string $module, ?int $tenantId = null): void
+    {
+        $tenantId = $tenantId ?? TenantContext::getTenantId();
+
+        if ($tenantId === null) {
+            return;
+        }
+
+        $now = now();
+
+        DB::table('module_sequences')
+            ->where('tenant_id', $tenantId)
+            ->where('module', $module)
+            ->where('last_number', '>', 0)
+            ->decrement('last_number', 1, ['updated_at' => $now]);
+    }
+
+    public function current(string $module, ?int $tenantId = null): int
+    {
+        $tenantId = $tenantId ?? TenantContext::getTenantId();
+
+        if ($tenantId === null) {
+            return 0;
+        }
+
+        $sequence = DB::table('module_sequences')
+            ->where('tenant_id', $tenantId)
+            ->where('module', $module)
+            ->first();
+
+        return $sequence ? (int) $sequence->last_number : 0;
+    }
 }

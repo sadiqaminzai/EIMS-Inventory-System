@@ -22,24 +22,35 @@ class UserController extends Controller
     {
         $isSuperAdmin = $request->user()?->hasRole('superadmin') ?? false;
         $tenantId = $request->user()?->tenant_id;
+        $requestedTenantId = $request->filled('tenant_id') ? (int) $request->input('tenant_id') : null;
 
-        if ($isSuperAdmin && $request->filled('tenant_id')) {
-            $tenantId = (int) $request->input('tenant_id');
+        if ($isSuperAdmin && $requestedTenantId) {
+            $tenantId = $requestedTenantId;
         }
 
-        // Support selecting a role by name for the active tenant
+        // Support selecting a role by name for the active tenant (or global role)
         if ($request->filled('role_name') && !$request->filled('role_id')) {
-            $roleByName = Role::query()->where('tenant_id', $tenantId)->where('name', $request->input('role_name'))->first();
+            $roleQuery = $isSuperAdmin ? Role::withoutGlobalScope('tenant') : Role::query();
+            $roleByName = $roleQuery
+                ->where('tenant_id', $tenantId)
+                ->where('name', $request->input('role_name'))
+                ->first();
             if ($roleByName) {
                 $request->merge(['role_id' => $roleByName->id]);
             }
+        }
+
+        // Build role_id validation: superadmin can assign any role, others restricted to their tenant
+        $roleExistsRule = Rule::exists('roles', 'id');
+        if (!$isSuperAdmin) {
+            $roleExistsRule->where('tenant_id', $tenantId);
         }
 
         $data = $request->validate([
             'name' => ['required', 'string'],
             'email' => ['required', 'email', Rule::unique('users', 'email')->where('tenant_id', $tenantId)],
             'password' => ['required', 'string', 'min:6'],
-            'role_id' => ['required_without:role_name', 'integer', Rule::exists('roles', 'id')->where('tenant_id', $tenantId)],
+            'role_id' => ['required_without:role_name', 'integer', $roleExistsRule],
             'role_name' => ['required_without:role_id', 'string'],
             'tenant_id' => $isSuperAdmin ? ['nullable', 'integer', Rule::exists('tenants', 'id')] : ['nullable'],
             'is_active' => ['nullable', 'boolean'],
@@ -50,13 +61,27 @@ class UserController extends Controller
         // Resolve role by name if role_id was not provided
         $role = null;
         if (!empty($data['role_id'])) {
-            $role = Role::query()->where('tenant_id', $tenantId)->find($data['role_id']);
+            $roleQuery = $isSuperAdmin ? Role::withoutGlobalScope('tenant') : Role::query();
+            $role = $roleQuery
+                ->when(!$isSuperAdmin, function ($query) use ($tenantId) {
+                    $query->where('tenant_id', $tenantId);
+                })
+                ->find($data['role_id']);
         }
         if (!$role && !empty($data['role_name'])) {
-            $role = Role::query()->where('tenant_id', $tenantId)->where('name', $data['role_name'])->first();
+            $roleQuery = $isSuperAdmin ? Role::withoutGlobalScope('tenant') : Role::query();
+            $role = $roleQuery
+                ->when(!$isSuperAdmin, function ($query) use ($tenantId) {
+                    $query->where('tenant_id', $tenantId);
+                })
+                ->where('name', $data['role_name'])
+                ->first();
         }
         if (!$role) {
             return response()->json(['message' => 'The selected role is invalid for the chosen tenant.'], 422);
+        }
+        if ($isSuperAdmin) {
+            $tenantId = $role->tenant_id ?? $requestedTenantId ?? $tenantId;
         }
         $data['role_id'] = $role->id;
 
@@ -94,24 +119,35 @@ class UserController extends Controller
     {
         $isSuperAdmin = $request->user()?->hasRole('superadmin') ?? false;
         $tenantId = $user->tenant_id;
+        $requestedTenantId = $request->filled('tenant_id') ? (int) $request->input('tenant_id') : null;
 
-        if ($isSuperAdmin && $request->filled('tenant_id')) {
-            $tenantId = (int) $request->input('tenant_id');
+        if ($isSuperAdmin && $requestedTenantId) {
+            $tenantId = $requestedTenantId;
         }
 
-        // Support selecting a role by name for the active tenant during update
+        // Support selecting a role by name for the active tenant (or global role) during update
         if ($request->filled('role_name') && !$request->filled('role_id')) {
-            $roleByName = Role::query()->where('tenant_id', $tenantId)->where('name', $request->input('role_name'))->first();
+            $roleQuery = $isSuperAdmin ? Role::withoutGlobalScope('tenant') : Role::query();
+            $roleByName = $roleQuery
+                ->where('tenant_id', $tenantId)
+                ->where('name', $request->input('role_name'))
+                ->first();
             if ($roleByName) {
                 $request->merge(['role_id' => $roleByName->id]);
             }
+        }
+
+        // Build role_id validation: superadmin can assign any role, others restricted to their tenant
+        $roleExistsRule = Rule::exists('roles', 'id');
+        if (!$isSuperAdmin) {
+            $roleExistsRule->where('tenant_id', $tenantId);
         }
 
         $data = $request->validate([
             'name' => ['required', 'string'],
             'email' => ['required', 'email', Rule::unique('users', 'email')->where('tenant_id', $tenantId)->ignore($user->id)],
             'password' => ['nullable', 'string', 'min:6'],
-            'role_id' => ['required_without:role_name', 'integer', Rule::exists('roles', 'id')->where('tenant_id', $tenantId)],
+            'role_id' => ['required_without:role_name', 'integer', $roleExistsRule],
             'role_name' => ['required_without:role_id', 'string'],
             'tenant_id' => $isSuperAdmin ? ['nullable', 'integer', Rule::exists('tenants', 'id')] : ['nullable'],
             'is_active' => ['nullable', 'boolean'],
@@ -121,13 +157,27 @@ class UserController extends Controller
         // Resolve role by name if necessary
         $role = null;
         if (!empty($data['role_id'])) {
-            $role = Role::query()->where('tenant_id', $tenantId)->find($data['role_id']);
+            $roleQuery = $isSuperAdmin ? Role::withoutGlobalScope('tenant') : Role::query();
+            $role = $roleQuery
+                ->when(!$isSuperAdmin, function ($query) use ($tenantId) {
+                    $query->where('tenant_id', $tenantId);
+                })
+                ->find($data['role_id']);
         }
         if (!$role && !empty($data['role_name'])) {
-            $role = Role::query()->where('tenant_id', $tenantId)->where('name', $data['role_name'])->first();
+            $roleQuery = $isSuperAdmin ? Role::withoutGlobalScope('tenant') : Role::query();
+            $role = $roleQuery
+                ->when(!$isSuperAdmin, function ($query) use ($tenantId) {
+                    $query->where('tenant_id', $tenantId);
+                })
+                ->where('name', $data['role_name'])
+                ->first();
         }
         if (!$role) {
             return response()->json(['message' => 'The selected role is invalid for the chosen tenant.'], 422);
+        }
+        if ($isSuperAdmin) {
+            $tenantId = $role->tenant_id ?? $requestedTenantId ?? $tenantId;
         }
         $data['role_id'] = $role->id;
 

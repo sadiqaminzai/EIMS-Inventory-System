@@ -12,6 +12,7 @@ class Brand extends Model
 
     protected $fillable = [
         'tenant_id',
+        'serial_no',
         'name',
         'details',
         'status',

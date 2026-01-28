@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Brand;
+use App\Support\ModuleSequenceService;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -23,7 +24,10 @@ class BrandController extends Controller
             'status' => ['nullable', 'string'],
         ]);
 
+        $serial = app(ModuleSequenceService::class)->next('brand');
+
         $brand = Brand::create(array_merge($data, [
+            'serial_no' => (string) $serial,
             'created_by' => $request->user()->id,
             'updated_by' => $request->user()->id,
         ]));
@@ -49,6 +53,7 @@ class BrandController extends Controller
     public function destroy(Brand $brand)
     {
         $brand->delete();
+        app(ModuleSequenceService::class)->decrement('brand');
 
         return response()->json(['message' => 'Deleted']);
     }

@@ -383,7 +383,8 @@ export const ReturnsPage = () => {
       {printData && (
         <PrintHandler 
             data={printData} 
-            type="return" 
+            type="return"
+            partyName={customers.find(c => c.id === printData.customer_id)?.name}
             onAfterPrint={() => setPrintData(null)} 
         />
       )}

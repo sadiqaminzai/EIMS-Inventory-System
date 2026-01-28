@@ -79,6 +79,7 @@ export const Layout = () => {
           tenant_id: String((profile as any).tenant_id ?? localStorage.getItem('tenant_id') ?? '1'),
           status: 'active',
           must_change_password: (profile as any).must_change_password ?? false,
+          permissions: (profile as any).permissions ?? [],
         });
       }).catch(() => undefined);
     }
@@ -306,7 +307,10 @@ export const Layout = () => {
 
           {/* Section labels removed */}
           {/* Reports removed as requested */}
-          <NavItem to="/settings" label="Settings" icon={Settings} perm="settings.view" />
+          {/* Settings - show if user has any settings permission */}
+          {(hasPermission('settings.view') || hasPermission('settings.general') || hasPermission('settings.print') || hasPermission('settings.profile') || hasPermission('settings.users') || hasPermission('settings.roles') || hasPermission('settings.permissions') || hasPermission('settings.clients')) && (
+            <NavItem to="/settings" label="Settings" icon={Settings} />
+          )}
         </div>
 
         {/* Desktop Collapse Toggle */}

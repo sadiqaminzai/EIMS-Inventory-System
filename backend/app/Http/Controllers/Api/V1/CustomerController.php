@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Support\ModuleSequenceService;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -26,7 +27,10 @@ class CustomerController extends Controller
             'status' => ['nullable', 'string'],
         ]);
 
+        $serial = app(ModuleSequenceService::class)->next('customer');
+
         $customer = Customer::create(array_merge($data, [
+            'serial_no' => (string) $serial,
             'created_by' => $request->user()->id,
             'updated_by' => $request->user()->id,
         ]));
@@ -55,6 +59,7 @@ class CustomerController extends Controller
     public function destroy(Customer $customer)
     {
         $customer->delete();
+        app(ModuleSequenceService::class)->decrement('customer');
 
         return response()->json(['message' => 'Deleted']);
     }

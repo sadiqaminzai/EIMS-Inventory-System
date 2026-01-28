@@ -18,16 +18,17 @@ class AuthController extends Controller
             'tenant_id' => ['nullable', 'integer'],
         ]);
 
-        $tenantId = $data['tenant_id'] ?? Tenant::query()->value('id');
-        if (!$tenantId) {
-            return response()->json(['message' => 'No tenant configured'], 422);
+        // Build user query - find by email first
+        $userQuery = User::query()
+            ->where('email', $data['email'])
+            ->where('is_active', true);
+
+        // If tenant_id is provided, filter by it
+        if (!empty($data['tenant_id'])) {
+            $userQuery->where('tenant_id', $data['tenant_id']);
         }
 
-        $user = User::query()
-            ->where('tenant_id', $tenantId)
-            ->where('email', $data['email'])
-            ->where('is_active', true)
-            ->first();
+        $user = $userQuery->first();
 
         if (!$user || !Hash::check($data['password'], $user->password)) {
             return response()->json(['message' => 'Invalid credentials'], 401);
@@ -56,8 +57,13 @@ class AuthController extends Controller
 
     protected function transformUser(User $user): array
     {
-        $roleName = $user->getRoleNames()->first();
-        $permissions = $user->getAllPermissions()->pluck('name')->values()->all();
+        $roleName = $user->role?->name ?? $user->getRoleNames()->first();
+
+        // Get permissions directly from the user's role to avoid Spatie team context issues
+        $permissions = [];
+        if ($user->role) {
+            $permissions = $user->role->permissions->pluck('name')->values()->all();
+        }
 
         return [
             'id' => $user->id,

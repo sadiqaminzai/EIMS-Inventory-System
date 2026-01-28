@@ -414,7 +414,8 @@ export const PurchasesPage = () => {
       {printData && (
         <PrintHandler 
             data={printData} 
-            type="purchase" 
+            type="purchase"
+            partyName={suppliers.find(s => s.id === printData.supplier_id)?.name}
             onAfterPrint={() => setPrintData(null)} 
         />
       )}

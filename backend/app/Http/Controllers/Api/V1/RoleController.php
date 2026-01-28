@@ -14,10 +14,11 @@ class RoleController extends Controller
     public function index(Request $request)
     {
         $tenantId = $request->input('tenant_id');
+        $isSuperAdmin = $request->user()?->hasRole('superadmin') ?? false;
 
-        $query = Role::query()
-            ->with(['permissions', 'tenant'])
-            ->orderBy('name');
+        // Superadmin can see all roles across tenants, others see only their tenant's roles
+        $query = $isSuperAdmin ? Role::withoutGlobalScope('tenant') : Role::query();
+        $query->with(['permissions', 'tenant'])->orderBy('name');
 
         if ($tenantId) {
             $query->where('tenant_id', (int) $tenantId);

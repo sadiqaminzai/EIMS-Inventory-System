@@ -3,6 +3,7 @@ import apiClient from './client';
 // Types mirroring the DB Schema
 export interface Product {
   id: number;
+  category_id?: number;
   sku?: string;
   model_no?: string;
   name: string;

@@ -1,8 +1,9 @@
 import { useForm } from 'react-hook-form';
 import { useStore, Tenant, PrintSettings, User, Role, Permission, RoleItem } from '../../store';
 import { roleApi } from '../../api/roles';
+import { backupApi, BackupDto, BackupSettingsDto, BackupSettingsUpdateDto } from '../../api/backups';
 import { DenseInput, DenseSelect } from '../components/ui/Form';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { ImageUpload } from '../components/ui/ImageUpload';
 import { Button } from '../components/ui/button';
@@ -10,11 +11,12 @@ import { Modal } from '../components/ui/Modal';
 import { DenseTable } from '../components/ui/DenseTable';
 import { ActionButtons } from '../components/ui/ActionButtons';
 import { ConfirmationDialog } from '../components/ui/ConfirmationDialog';
-import { Save, User as UserIcon, Shield, Lock, Settings as SettingsIcon, Building, Printer, Camera, X } from 'lucide-react';
+import { Save, User as UserIcon, Shield, Lock, Settings as SettingsIcon, Building, Printer, Camera, X, Database, Download, Trash2, RefreshCw, Clock, Calendar, HardDrive, Play, AlertCircle, CheckCircle } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { format, addYears, addMonths } from 'date-fns';
+import { toast } from 'sonner';
 
 // --- Components for General Tab ---
 
@@ -603,26 +605,55 @@ const UserForm = ({ initialData, onSave, onCancel }: { initialData?: User, onSav
         };
     }, [isSuperAdmin, selectedTenantId]);
 
-    const roleOptions = (tenantRoles ?? roles)
-        .filter((role) => currentUser.role === 'superadmin' || role.name !== 'superadmin')
-        .filter((role) => !requiresTenant || !selectedTenantId || !role.tenant_id || String(role.tenant_id) === String(selectedTenantId))
-        .map((role) => ({ value: role.name, label: formatRoleLabel(role.name) }));
+    const roleOptions = useMemo(() => (
+        (tenantRoles ?? roles)
+            .filter((role) => currentUser.role === 'superadmin' || role.name !== 'superadmin')
+            .filter((role) => !requiresTenant || !selectedTenantId || !role.tenant_id || String(role.tenant_id) === String(selectedTenantId))
+            .map((role) => ({ value: String(role.id ?? role.name), label: formatRoleLabel(role.name) }))
+    ), [tenantRoles, roles, currentUser.role, requiresTenant, selectedTenantId]);
 
-    const tenantOptions = (clients ?? []).map((t) => ({ value: t.id, label: t.name }));
+    const tenantOptions = useMemo(
+        () => (clients ?? []).map((t) => ({ value: t.id, label: t.name })),
+        [clients]
+    );
 
     useEffect(() => {
         if (!isSuperAdmin) {
-            setValue('tenant_id', tenant.id, { shouldDirty: true });
+            if (String(selectedTenantId ?? '') !== String(tenant.id)) {
+                setValue('tenant_id', tenant.id, { shouldDirty: true });
+            }
             return;
         }
-        if (selectedRole === 'superadmin') {
-            setValue('tenant_id', '', { shouldDirty: true });
-            return;
-        }
-        if (!selectedTenantId && tenantOptions.length > 0) {
-            setValue('tenant_id', String(tenantOptions[0].value), { shouldDirty: true });
+        if (!selectedTenantId) {
+            const fallback = String(tenant.id ?? tenantOptions[0]?.value ?? '');
+            if (fallback && String(selectedTenantId ?? '') !== fallback) {
+                setValue('tenant_id', fallback, { shouldDirty: true });
+            }
         }
     }, [isSuperAdmin, selectedRole, selectedTenantId, tenant.id, tenantOptions, setValue]);
+
+    useEffect(() => {
+        if (!isSuperAdmin) return;
+        if (!tenantOptions.length) return;
+        const currentTenant = String(selectedTenantId ?? '');
+        const tenantValues = new Set(tenantOptions.map((opt) => String(opt.value)));
+        if (!currentTenant || !tenantValues.has(currentTenant)) {
+            const fallback = String(tenantOptions[0].value ?? '');
+            if (fallback && currentTenant !== fallback) {
+                setValue('tenant_id', fallback, { shouldDirty: true });
+            }
+        }
+    }, [isSuperAdmin, tenantOptions, selectedTenantId, setValue]);
+
+    useEffect(() => {
+        if (!roleOptions.length) return;
+        const currentRole = String(selectedRole ?? '');
+        const roleValues = new Set(roleOptions.map((opt) => String(opt.value)));
+        const nextRole = String(roleOptions[0].value ?? '');
+        if (!roleValues.has(currentRole) && nextRole && currentRole !== nextRole) {
+            setValue('role', roleOptions[0].value, { shouldDirty: true });
+        }
+    }, [roleOptions, selectedRole, setValue]);
 
     return (
         <form onSubmit={handleSubmit(onSave)} className="space-y-4">
@@ -674,11 +705,11 @@ const UserForm = ({ initialData, onSave, onCancel }: { initialData?: User, onSav
                     {...register('password')}
                 />
             )}
-            {requiresTenant && (
+            {isSuperAdmin && (
                 <DenseSelect
                     label="Tenant"
                     options={tenantOptions}
-                    {...register('tenant_id', { required: 'Required' })}
+                    {...register('tenant_id', requiresTenant ? { required: 'Required' } : undefined)}
                     error={errors.tenant_id?.message as string}
                 />
             )}
@@ -1474,37 +1505,337 @@ const PermissionsTab = () => {
     );
 };
 
+const BackupsTab = () => {
+    const { hasPermission } = useStore();
+    const [backups, setBackups] = useState<BackupDto[]>([]);
+    const [settings, setSettings] = useState<BackupSettingsDto | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+    const [restoreConfirm, setRestoreConfirm] = useState<BackupDto | null>(null);
+    const [creatingBackup, setCreatingBackup] = useState(false);
+    const { register, handleSubmit, reset, formState: { errors } } = useForm<BackupSettingsUpdateDto>({
+        defaultValues: {}
+    });
+
+    const loadBackups = useCallback(async () => {
+        setLoading(true);
+        try {
+            const data = await backupApi.getBackups();
+            setBackups(data.data);
+        } catch (error) {
+            toast.error('Failed to load backups');
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const loadSettings = useCallback(async () => {
+        try {
+            const data = await backupApi.getSettings();
+            setSettings(data);
+            reset({
+                auto_backup_enabled: data.auto_backup_enabled,
+                frequency: data.frequency,
+                backup_time: data.backup_time,
+                retention_days: data.retention_days,
+                max_backups: data.max_backups,
+            });
+        } catch (error) {
+            toast.error('Failed to load backup settings');
+        }
+    }, [reset]);
+
+    useEffect(() => {
+        if (hasPermission('settings.backup')) {
+            loadBackups();
+            loadSettings();
+        }
+    }, [hasPermission, loadBackups, loadSettings]);
+
+    const handleCreateBackup = async () => {
+        setCreatingBackup(true);
+        try {
+            await backupApi.createBackup();
+            toast.success('Backup created successfully');
+            loadBackups();
+        } catch (error) {
+            toast.error('Failed to create backup');
+        } finally {
+            setCreatingBackup(false);
+        }
+    };
+
+    const handleDeleteBackup = async (backupId: number) => {
+        try {
+            await backupApi.deleteBackup(backupId);
+            toast.success('Backup deleted successfully');
+            loadBackups();
+        } catch (error) {
+            toast.error('Failed to delete backup');
+        }
+    };
+
+    const handleRestoreBackup = async (backup: BackupDto) => {
+        try {
+            await backupApi.restoreBackup(backup.id);
+            toast.success('Backup restored successfully');
+            setRestoreConfirm(null);
+        } catch (error) {
+            toast.error('Failed to restore backup');
+        }
+    };
+
+    const handleDownloadBackup = async (backup: BackupDto) => {
+        try {
+            const blob = await backupApi.downloadBackup(backup.id);
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = backup.filename;
+            link.click();
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            toast.error('Failed to download backup');
+        }
+    };
+
+    const handleUpdateSettings = (data: BackupSettingsUpdateDto) => {
+        backupApi.updateSettings(data).then(() => {
+            toast.success('Backup settings updated');
+            loadSettings();
+            setSettingsModalOpen(false);
+        }).catch(() => {
+            toast.error('Failed to update backup settings');
+        });
+    };
+
+    const backupColumns = [
+        { header: 'Filename', accessorKey: 'filename', sortable: true },
+        { header: 'Type', accessorKey: 'type', sortable: true, cell: (item: BackupDto) => <span className="capitalize text-xs">{item.type}</span> },
+        { header: 'Size', accessorKey: 'formatted_size', cell: (item: BackupDto) => item.formatted_size || 'N/A' },
+        { header: 'Status', accessorKey: 'status', sortable: true, cell: (item: BackupDto) => (
+            <span className={clsx('capitalize text-xs px-2 py-1 rounded-full', {
+                'bg-yellow-100 text-yellow-800': item.status === 'pending',
+                'bg-blue-100 text-blue-800': item.status === 'in_progress',
+                'bg-green-100 text-green-800': item.status === 'completed',
+                'bg-red-100 text-red-800': item.status === 'failed',
+            })}>
+                {item.status}
+            </span>
+        )},
+        { header: 'Created', accessorKey: 'created_at', cell: (item: BackupDto) => format(new Date(item.created_at), 'MMM dd, yyyy HH:mm') },
+        {
+            header: 'Actions',
+            width: '160px',
+            cell: (item: BackupDto) => (
+                <ActionButtons
+                    onView={hasPermission('backup.download') ? () => handleDownloadBackup(item) : undefined}
+                    onEdit={hasPermission('backup.restore') ? () => setRestoreConfirm(item) : undefined}
+                    onDelete={hasPermission('backup.delete') ? () => handleDeleteBackup(item.id) : undefined}
+                />
+            )
+        }
+    ];
+
+    if (!hasPermission('settings.backup')) return <div>Access Denied</div>;
+
+    return (
+        <div className="space-y-4">
+            <div className="bg-white p-4 rounded-lg border border-gray-200">
+                <div className="flex justify-between items-center mb-4">
+                    <div>
+                        <h3 className="text-lg font-medium text-gray-900 flex items-center gap-2">
+                            <Database size={20} /> Database Backups
+                        </h3>
+                        <p className="text-sm text-gray-500 mt-1">Create and manage database backups</p>
+                    </div>
+                    <div className="flex gap-2">
+                        <Button 
+                            onClick={() => setSettingsModalOpen(true)}
+                            variant="outline"
+                            size="sm"
+                            className="gap-2"
+                        >
+                            <SettingsIcon size={14} /> Settings
+                        </Button>
+                        <Button 
+                            onClick={handleCreateBackup}
+                            disabled={creatingBackup}
+                            size="sm"
+                            className="gap-2 bg-green-600 hover:bg-green-700 text-white"
+                        >
+                            <HardDrive size={14} /> Create Backup
+                        </Button>
+                    </div>
+                </div>
+
+                <DenseTable
+                    data={backups}
+                    columns={backupColumns as any}
+                    title="Backups"
+                    isLoading={loading}
+                    canSearch={false}
+                    defaultSort={{ key: 'created_at', direction: 'desc' }}
+                />
+            </div>
+
+            <Modal
+                open={settingsModalOpen}
+                onOpenChange={(open) => {
+                    setSettingsModalOpen(open);
+                    if (!open) loadSettings();
+                }}
+                title="Backup Settings"
+                className="max-w-lg"
+            >
+                {settings && (
+                    <form onSubmit={handleSubmit(handleUpdateSettings)} className="space-y-4">
+                        <div className="flex items-center gap-2">
+                            <input 
+                                type="checkbox" 
+                                {...register('auto_backup_enabled')} 
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                id="auto_backup"
+                            />
+                            <label htmlFor="auto_backup" className="text-sm font-medium text-gray-700">Enable Automatic Backups</label>
+                        </div>
+
+                        <DenseSelect
+                            label="Frequency"
+                            options={[
+                                { value: 'daily', label: 'Daily' },
+                                { value: 'weekly', label: 'Weekly' },
+                                { value: 'monthly', label: 'Monthly' },
+                            ]}
+                            {...register('frequency')}
+                        />
+
+                        <DenseInput
+                            label="Backup Time"
+                            type="time"
+                            {...register('backup_time')}
+                        />
+
+                        <DenseInput
+                            label="Retention Days"
+                            type="number"
+                            {...register('retention_days', { required: 'Required' })}
+                            error={errors.retention_days?.message}
+                        />
+
+                        <DenseInput
+                            label="Max Backups to Keep"
+                            type="number"
+                            {...register('max_backups', { required: 'Required' })}
+                            error={errors.max_backups?.message}
+                        />
+
+                        {settings.last_backup_at && (
+                            <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                                <div className="text-[11px] uppercase tracking-wide text-gray-500">Last Backup</div>
+                                <div className="text-sm font-medium text-gray-900 mt-1">{format(new Date(settings.last_backup_at), 'MMM dd, yyyy HH:mm')}</div>
+                            </div>
+                        )}
+
+                        {settings.next_backup_at && (
+                            <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                                <div className="text-[11px] uppercase tracking-wide text-gray-500">Next Backup</div>
+                                <div className="text-sm font-medium text-gray-900 mt-1">{format(new Date(settings.next_backup_at), 'MMM dd, yyyy HH:mm')}</div>
+                            </div>
+                        )}
+
+                        <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+                            <Button type="button" variant="outline" onClick={() => setSettingsModalOpen(false)} className="gap-2 text-gray-700 border-gray-300 hover:bg-gray-50">
+                                <X size={14} /> Cancel
+                            </Button>
+                            <Button type="submit" className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white">
+                                <Save size={14} /> Save
+                            </Button>
+                        </div>
+                    </form>
+                )}
+            </Modal>
+
+            <ConfirmationDialog
+                open={restoreConfirm !== null}
+                onOpenChange={(open) => !open && setRestoreConfirm(null)}
+                title="Restore Backup"
+                description={`Are you sure you want to restore from ${restoreConfirm?.filename}? This will overwrite the current database.`}
+                onConfirm={() => { if (restoreConfirm) handleRestoreBackup(restoreConfirm); }}
+                confirmLabel="Restore"
+            />
+        </div>
+    );
+};
+
 // --- Components for Profile Tab ---
 
 const ProfileTab = () => {
     const { currentUser, updateCurrentUser } = useStore();
-    const { register, handleSubmit, formState: { errors } } = useForm({ defaultValues: currentUser });
+    const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm({ defaultValues: currentUser });
     const formatRoleLabel = (name?: string) =>
         (name ?? '')
             .replace(/[-_]/g, ' ')
             .replace(/\b\w/g, (c) => c.toUpperCase());
 
+    const avatar = watch('avatar');
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setValue('avatar', reader.result as string, { shouldDirty: true });
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
     return (
         <div className="max-w-2xl mx-auto">
              <form onSubmit={handleSubmit((data) => updateCurrentUser(data))} className="space-y-6 bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
-                <div className="flex items-center gap-4 border-b border-gray-100 pb-6">
-                    <div className="h-20 w-20 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 text-2xl font-bold">
-                        {currentUser.avatar ? (
-                            <img src={currentUser.avatar} alt={currentUser.name} className="h-full w-full rounded-full object-cover" />
-                        ) : (
-                            currentUser.name.charAt(0)
-                        )}
+                <div className="flex flex-col items-center gap-2 mb-6">
+                    <div className="relative group cursor-pointer">
+                        <div className="h-24 w-24 rounded-full overflow-hidden bg-gray-50 flex items-center justify-center border-2 border-white shadow-md relative ring-2 ring-gray-100">
+                            {avatar ? (
+                                <img src={avatar} alt={currentUser.name} className="h-full w-full object-cover" />
+                            ) : (
+                                <div className="h-full w-full bg-blue-100 flex items-center justify-center text-blue-600 text-2xl font-bold">
+                                    {currentUser.name.charAt(0)}
+                                </div>
+                            )}
+                            
+                            {/* Overlay */}
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                                <div className="opacity-0 group-hover:opacity-100 bg-black/50 text-white text-[10px] px-2 py-1 rounded-full backdrop-blur-sm transition-opacity font-medium">
+                                    Change
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Camera Icon Button */}
+                        <div className="absolute bottom-0 right-1 bg-white rounded-full p-1.5 shadow-sm border border-gray-200 text-gray-500 group-hover:text-blue-600 transition-colors z-20">
+                            <Camera className="w-3.5 h-3.5" />
+                        </div>
+
+                        <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                            onChange={handleFileChange}
+                            title="Upload avatar"
+                        />
                     </div>
-                    <div>
+                    <div className="text-center">
                         <h3 className="text-xl font-bold text-gray-900">{currentUser.name}</h3>
-                        <p className="text-gray-500">{currentUser.email}</p>
+                        <p className="text-sm text-gray-500">{currentUser.email}</p>
                         <span className="inline-block mt-2 px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-medium rounded">
                             {formatRoleLabel(currentUser.role)}
                         </span>
                     </div>
                 </div>
 
-                <div className="grid gap-4">
+                <div className="grid gap-4 border-t border-gray-100 pt-6">
                     <DenseInput label="Full Name" {...register('name', { required: 'Required' })} error={errors.name?.message} />
                     <DenseInput label="Email Address" type="email" {...register('email', { required: 'Required' })} error={errors.email?.message} readOnly className="bg-gray-50" />
                     <div className="pt-4">
@@ -1516,8 +1847,10 @@ const ProfileTab = () => {
                     </div>
                 </div>
 
-                <div className="pt-4 flex justify-end">
-                    <Button type="submit">Update Profile</Button>
+                <div className="pt-4 flex justify-end border-t border-gray-100">
+                    <Button type="submit" className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white">
+                        <Save size={14} /> Save
+                    </Button>
                 </div>
             </form>
         </div>
@@ -1534,6 +1867,7 @@ export const SettingsPage = () => {
       { id: 'users', label: 'Users', icon: UserIcon, perm: 'settings.users' },
       { id: 'roles', label: 'Roles', icon: Shield, perm: 'settings.roles' },
       { id: 'permissions', label: 'Permissions', icon: Lock, perm: 'settings.permissions' },
+      { id: 'backup', label: 'Backup', icon: Database, perm: 'settings.backup' },
       { id: 'profile', label: 'Profile', icon: UserIcon, perm: 'settings.profile' },
   ];
 
@@ -1548,7 +1882,18 @@ export const SettingsPage = () => {
     }
   }, [tabs, activeTab]);
 
-  if (!hasPermission('settings.view')) return <div>Access Denied</div>;
+  // Allow access if user has any settings permission
+  const hasAnySettingsPermission = hasPermission('settings.view') || 
+    hasPermission('settings.general') || 
+    hasPermission('settings.print') || 
+    hasPermission('settings.profile') ||
+    hasPermission('settings.users') ||
+    hasPermission('settings.roles') ||
+    hasPermission('settings.permissions') ||
+    hasPermission('settings.clients') ||
+    hasPermission('settings.backup');
+
+  if (!hasAnySettingsPermission) return <div>Access Denied</div>;
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm min-h-full flex flex-col">
@@ -1578,6 +1923,7 @@ export const SettingsPage = () => {
         {activeTab === 'users' && hasPermission('settings.users') && <UsersTab />}
         {activeTab === 'roles' && hasPermission('settings.roles') && <RolesTab />}
         {activeTab === 'permissions' && hasPermission('settings.permissions') && <PermissionsTab />}
+        {activeTab === 'backup' && hasPermission('settings.backup') && <BackupsTab />}
         {activeTab === 'profile' && hasPermission('settings.profile') && <ProfileTab />}
       </div>
     </div>

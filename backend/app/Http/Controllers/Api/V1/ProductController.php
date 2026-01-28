@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\InventoryBatch;
 use App\Models\Product;
+use App\Support\ModuleSequenceService;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -72,7 +73,10 @@ class ProductController extends Controller
             unset($data['photo']);
         }
 
+        $serial = app(ModuleSequenceService::class)->next('product');
+
         $product = Product::create(array_merge($data, [
+            'serial_no' => (string) $serial,
             'created_by' => $request->user()->id,
             'updated_by' => $request->user()->id,
         ]));
@@ -118,6 +122,7 @@ class ProductController extends Controller
     public function destroy(Product $product)
     {
         $product->delete();
+        app(ModuleSequenceService::class)->decrement('product');
 
         return response()->json(['message' => 'Deleted']);
     }
@@ -128,7 +133,7 @@ class ProductController extends Controller
             ->where('product_id', $product->id)
             ->where('quantity_remaining', '>', 0)
             ->orderByRaw('batch_no IS NULL DESC')
-            ->orderBy('received_date')
+            ->orderByRaw('CAST(batch_no AS UNSIGNED) ASC')
             ->get();
 
         return response()->json($batches);
@@ -138,7 +143,9 @@ class ProductController extends Controller
     {
         return [
             'id' => $product->id,
+            'serial_no' => $product->serial_no,
             'model_no' => $product->model_no ?? $product->sku ?? '',
+            'category_id' => $product->category_id,
             'name' => $product->name,
             'description' => $product->description,
             'photo' => $product->photo ?? $product->image_url,
@@ -146,6 +153,7 @@ class ProductController extends Controller
             'sale_price' => (float) ($product->sale_price ?? 0),
             'brand_id' => $product->brand_id,
             'country_id' => $product->country_id,
+            'unit_of_measure' => $product->unit_of_measure,
             'status' => $product->status ?? ($product->is_active ? 'active' : 'inactive'),
             'stock_qty' => (int) ($product->current_stock ?? 0),
             'created_by' => $product->created_by,

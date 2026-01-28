@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { toast } from 'sonner';
 import { inventoryApi } from '../api/inventory';
 import { brandApi } from '../api/brands';
+import { categoryApi } from '../api/categories';
 import { countryApi } from '../api/countries';
 import { supplierApi } from '../api/suppliers';
 import { customerApi } from '../api/customers';
@@ -31,6 +32,7 @@ export interface User {
   avatar?: string;
   status: 'active' | 'inactive';
   must_change_password?: boolean;
+  permissions?: string[];
   created_at?: string;
   updated_at?: string;
   created_by?: string;
@@ -77,14 +79,19 @@ export interface PermissionItem {
 }
 
 export interface Brand extends BaseEntity { id: string; name: string; details?: string; status: 'active' | 'inactive'; }
+export interface Category extends BaseEntity { id: string; name: string; details?: string; status: 'active' | 'inactive'; }
 export interface Country extends BaseEntity { id: string; name: string; details?: string; status: 'active' | 'inactive'; }
 export interface Product extends BaseEntity {
   id: string;
+  category_id?: string | null;
   model_no: string;
+  sku?: string;
   name: string;
   description?: string;
   photo?: string;
   photo_file?: File;
+  image_url?: string;
+  unit_of_measure?: string | null;
   cost_price: number;
   sale_price: number;
   brand_id: string;
@@ -276,6 +283,7 @@ interface AppState {
   permissionsCatalog: Permission[]; // List of available permissions
   clients: Tenant[]; // List of all tenants (for Super Admin)
   brands: Brand[];
+  categories: Category[];
   countries: Country[];
   products: Product[];
   suppliers: Supplier[];
@@ -322,6 +330,10 @@ interface AppState {
   addBrand: (data: Omit<Brand, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by'>) => void;
   updateBrand: (id: string, data: Partial<Brand>) => void;
   deleteBrand: (id: string) => void;
+
+  addCategory: (data: Omit<Category, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by'>) => void;
+  updateCategory: (id: string, data: Partial<Category>) => void;
+  deleteCategory: (id: string) => void;
 
   addCountry: (data: Omit<Country, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by'>) => void;
   updateCountry: (id: string, data: Partial<Country>) => void;
@@ -451,7 +463,7 @@ const DEFAULT_PERMISSIONS: Permission[] = [
   'account.transaction.save', 'account.transaction.cancel',
 
   // Settings & users
-  'settings.view', 'settings.edit', 'settings.general', 'settings.print', 'settings.clients', 'settings.users', 'settings.roles', 'settings.permissions', 'settings.profile',
+  'settings.view', 'settings.edit', 'settings.general', 'settings.print', 'settings.clients', 'settings.users', 'settings.roles', 'settings.permissions', 'settings.profile', 'settings.backup',
   'user.view', 'user.create', 'user.edit', 'user.delete', 'user.search', 'user.export', 'user.print',
   'role.view', 'role.create', 'role.edit', 'role.delete', 'role.search', 'role.export', 'role.print',
   'permission.view', 'permission.edit', 'permission.search', 'permission.export',
@@ -468,6 +480,7 @@ export const useStore = create<AppState>((set, get) => ({
   permissionsCatalog: [],
   clients: [],
   brands: [],
+  categories: [],
   countries: [],
   products: [],
   suppliers: [],
@@ -504,20 +517,47 @@ export const useStore = create<AppState>((set, get) => ({
       toast.error('Failed to update print settings');
     }
   },
+  updateTenant: async (data) => {
+    try {
+      // Build FormData if there's a logo file, otherwise send as JSON
+      const { logo_file, logo, license_no, license_expiry, license_issue, license_type, license_status, max_users, id, ...rest } = data as any;
+      
+      let payload: FormData | Record<string, any>;
+      if (logo_file instanceof File) {
+        payload = new FormData();
+        Object.entries(rest).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            (payload as FormData).append(key, String(value));
+          }
+        });
+        (payload as FormData).append('logo', logo_file);
+      } else {
+        payload = rest;
+      }
+      
+      const updated = await settingsApi.updateTenantProfile(payload as any);
+      toast.info('Company profile saved');
+      set(() => ({ tenant: updated as any }));
+    } catch {
+      toast.error('Failed to update company profile');
+    }
+  },
   bootstrapData: async () => {
     try {
-      const requests = [
+      // Get current user's role to determine what to load
+      const currentRole = get().currentUser.role?.toLowerCase();
+      const isSuperAdmin = currentRole === 'superadmin';
+
+      // Base requests that all authenticated users can access
+      const baseRequests = [
         settingsApi.getTenantProfile(),
         settingsApi.getPrintSettings(),
         brandApi.list(),
+        categoryApi.list(),
         countryApi.list(),
         inventoryApi.getProducts(),
         supplierApi.list(),
         customerApi.list(),
-        userApi.list(),
-        roleApi.list(),
-        permissionApi.list(),
-        tenantApi.list(),
         accountApi.list(),
         accountTransactionApi.list(),
         transactionApi.getHistory({ type: 'purchase' }),
@@ -526,18 +566,15 @@ export const useStore = create<AppState>((set, get) => ({
         transactionApi.getHistory({ type: 'return_out' }),
       ];
 
-      const labels = [
+      const baseLabels = [
         'Tenant Profile',
         'Print Settings',
         'Brands',
+        'Categories',
         'Countries',
         'Products',
         'Suppliers',
         'Customers',
-        'Users',
-        'Roles',
-        'Permissions',
-        'Clients',
         'Accounts',
         'Transactions',
         'Purchases',
@@ -546,12 +583,34 @@ export const useStore = create<AppState>((set, get) => ({
         'Returns (Out)',
       ];
 
+      // Admin-only requests (users, roles, permissions)
+      const adminRequests = isSuperAdmin ? [
+        userApi.list(),
+        roleApi.list(),
+        permissionApi.list(),
+        tenantApi.list(),
+      ] : [];
+
+      const adminLabels = isSuperAdmin ? [
+        'Users',
+        'Roles',
+        'Permissions',
+        'Clients',
+      ] : [];
+
+      const requests = [...baseRequests, ...adminRequests];
+      const labels = [...baseLabels, ...adminLabels];
+
       const results = await Promise.allSettled(requests);
 
       results.forEach((result, index) => {
         if (result.status === 'rejected') {
-          console.error(`Failed to load ${labels[index]}`, result.reason);
-          toast.error(`Failed to load ${labels[index]}`);
+          const reason = result.reason;
+          // Don't show toast for 403 errors - permission denied is expected for some users
+          if (reason?.response?.status !== 403) {
+            console.error(`Failed to load ${labels[index]}`, reason);
+            toast.error(`Failed to load ${labels[index]}`);
+          }
         }
       });
 
@@ -561,20 +620,23 @@ export const useStore = create<AppState>((set, get) => ({
       const tenant = unwrap(0, INITIAL_TENANT as any);
       const printSettings = unwrap(1, {} as any);
       const brands = unwrap(2, [] as any[]);
-      const countries = unwrap(3, [] as any[]);
-      const products = unwrap(4, [] as any);
-      const suppliers = unwrap(5, [] as any[]);
-      const customers = unwrap(6, [] as any[]);
-      const users = unwrap(7, [] as any[]);
-      const _roles = unwrap(8, [] as any[]);
-      const _permissions = unwrap(9, [] as any[]);
-      const clients = unwrap(10, [] as any[]);
-      const accounts = unwrap(11, [] as any[]);
-      const transactions = unwrap(12, [] as any[]);
-      const purchases = unwrap(13, [] as any);
-      const sales = unwrap(14, [] as any);
-      const returns = unwrap(15, [] as any);
-      const returnOuts = unwrap(16, [] as any);
+      const categories = unwrap(3, [] as any[]);
+      const countries = unwrap(4, [] as any[]);
+      const products = unwrap(5, [] as any);
+      const suppliers = unwrap(6, [] as any[]);
+      const customers = unwrap(7, [] as any[]);
+      const accounts = unwrap(8, [] as any[]);
+      const transactions = unwrap(9, [] as any[]);
+      const purchases = unwrap(10, [] as any);
+      const sales = unwrap(11, [] as any);
+      const returns = unwrap(12, [] as any);
+      const returnOuts = unwrap(13, [] as any);
+
+      // Admin-only data (with offset for base requests)
+      const users = isSuperAdmin ? unwrap(14, [] as any[]) : [];
+      const _roles = isSuperAdmin ? unwrap(15, [] as any[]) : [];
+      const _permissions = isSuperAdmin ? unwrap(16, [] as any[]) : [];
+      const clients = isSuperAdmin ? unwrap(17, [] as any[]) : [];
 
       const productList = Array.isArray(products?.data) ? products.data : (products?.data?.data ?? products?.data ?? products);
       const purchaseOrders = Array.isArray(purchases?.data) ? purchases.data : (purchases?.data?.data ?? purchases?.data ?? purchases);
@@ -655,6 +717,16 @@ export const useStore = create<AppState>((set, get) => ({
           created_by: resolveUser((b as any).created_by),
           updated_by: resolveUser((b as any).updated_by),
         })),
+        categories: (Array.isArray(categories) ? categories : []).map((c) => ({
+          id: String(c.id),
+          name: c.name,
+          details: c.details ?? undefined,
+          status: (c.status ?? 'active') as any,
+          created_at: c.created_at,
+          updated_at: c.updated_at,
+          created_by: resolveUser((c as any).created_by),
+          updated_by: resolveUser((c as any).updated_by),
+        })),
         countries: (Array.isArray(countries) ? countries : []).map((c) => ({
           id: String(c.id),
           name: c.name,
@@ -667,10 +739,14 @@ export const useStore = create<AppState>((set, get) => ({
         })),
         products: (productList || []).map((p: any) => ({
           id: String(p.id),
+          category_id: p.category_id !== undefined && p.category_id !== null ? String(p.category_id) : null,
           model_no: p.model_no ?? p.sku ?? '',
+          sku: p.sku ?? undefined,
           name: p.name,
           description: p.description,
           photo: resolveAssetUrl(p.photo ?? p.image_url),
+          image_url: resolveAssetUrl(p.image_url),
+          unit_of_measure: p.unit_of_measure ?? null,
           cost_price: Number(p.cost_price ?? 0),
           sale_price: Number(p.sale_price ?? 0),
           brand_id: p.brand_id ? String(p.brand_id) : '',
@@ -957,7 +1033,15 @@ export const useStore = create<AppState>((set, get) => ({
 
   addUser: async (data) => {
     try {
-      const roleName = (data.role as string) ?? '';
+      const roleValue = (data.role as string) ?? '';
+      const parsedRoleId = Number(roleValue);
+      const selectedTenantId = (data as any).tenant_id ?? get().tenant.id;
+      const roleIdFromList = get().roles.find((r) =>
+        String(r.name).toLowerCase() === String(roleValue).toLowerCase()
+        && (!r.tenant_id || String(r.tenant_id) === String(selectedTenantId))
+      )?.id;
+      const hasRoleId = roleValue !== '' && Number.isFinite(parsedRoleId) && String(parsedRoleId) === String(roleValue);
+      const resolvedRoleId = hasRoleId ? parsedRoleId : (roleIdFromList ?? undefined);
 
       let created;
       const avatarFile = (data as any).avatar_file as File | undefined;
@@ -966,7 +1050,11 @@ export const useStore = create<AppState>((set, get) => ({
         form.append('name', data.name ?? '');
         form.append('email', data.email ?? '');
         form.append('password', (data as any).password || 'password');
-        form.append('role_name', roleName);
+        if (resolvedRoleId !== undefined) {
+          form.append('role_id', String(resolvedRoleId));
+        } else {
+          form.append('role_name', roleValue);
+        }
         form.append('is_active', data.status !== 'inactive' ? '1' : '0');
         if ((data as any).tenant_id) form.append('tenant_id', String((data as any).tenant_id));
         form.append('avatar', avatarFile);
@@ -976,7 +1064,8 @@ export const useStore = create<AppState>((set, get) => ({
           name: data.name,
           email: data.email,
           password: (data as any).password || 'password',
-          role_name: roleName,
+          role_id: resolvedRoleId,
+          role_name: resolvedRoleId === undefined ? roleValue : undefined,
           is_active: data.status !== 'inactive',
           tenant_id: (data as any).tenant_id,
         });
@@ -1002,7 +1091,15 @@ export const useStore = create<AppState>((set, get) => ({
   },
   updateUser: async (id, data) => {
     try {
-      const roleName = (data.role as string) ?? '';
+      const roleValue = (data.role as string) ?? '';
+      const parsedRoleId = Number(roleValue);
+      const selectedTenantId = (data as any).tenant_id ?? get().tenant.id;
+      const roleIdFromList = get().roles.find((r) =>
+        String(r.name).toLowerCase() === String(roleValue).toLowerCase()
+        && (!r.tenant_id || String(r.tenant_id) === String(selectedTenantId))
+      )?.id;
+      const hasRoleId = roleValue !== '' && Number.isFinite(parsedRoleId) && String(parsedRoleId) === String(roleValue);
+      const resolvedRoleId = hasRoleId ? parsedRoleId : (roleIdFromList ?? undefined);
 
       let updated;
       const avatarFile = (data as any).avatar_file as File | undefined;
@@ -1011,7 +1108,11 @@ export const useStore = create<AppState>((set, get) => ({
         form.append('name', data.name ?? '');
         form.append('email', data.email ?? '');
         if ((data as any).password) form.append('password', (data as any).password);
-        form.append('role_name', roleName);
+        if (resolvedRoleId !== undefined) {
+          form.append('role_id', String(resolvedRoleId));
+        } else {
+          form.append('role_name', roleValue);
+        }
         form.append('is_active', data.status !== 'inactive' ? '1' : '0');
         if ((data as any).tenant_id) form.append('tenant_id', String((data as any).tenant_id));
         form.append('avatar', avatarFile);
@@ -1022,7 +1123,8 @@ export const useStore = create<AppState>((set, get) => ({
           name: data.name ?? '',
           email: data.email ?? '',
           password: (data as any).password || undefined,
-          role_name: roleName,
+          role_id: resolvedRoleId,
+          role_name: resolvedRoleId === undefined ? roleValue : undefined,
           is_active: data.status !== 'inactive',
           tenant_id: (data as any).tenant_id,
         });
@@ -1281,6 +1383,34 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  addCategory: async (data) => {
+    try {
+      await categoryApi.create(data);
+      toast.success('Category added successfully');
+      await get().bootstrapData();
+    } catch {
+      toast.error('Failed to add category');
+    }
+  },
+  updateCategory: async (id, data) => {
+    try {
+      await categoryApi.update(id, data);
+      toast.info('Category updated successfully');
+      await get().bootstrapData();
+    } catch {
+      toast.error('Failed to update category');
+    }
+  },
+  deleteCategory: async (id) => {
+    try {
+      await categoryApi.remove(id);
+      toast.error('Category deleted successfully');
+      await get().bootstrapData();
+    } catch {
+      toast.error('Failed to delete category');
+    }
+  },
+
   addCountry: async (data) => {
     try {
       await countryApi.create(data);
@@ -1321,16 +1451,20 @@ export const useStore = create<AppState>((set, get) => ({
         form.append('name', data.name ?? '');
         form.append('model_no', data.model_no ?? '');
         if (data.description) form.append('description', data.description);
+        if (data.category_id) form.append('category_id', String(data.category_id));
         if (data.brand_id) form.append('brand_id', String(data.brand_id));
         if (data.country_id) form.append('country_id', String(data.country_id));
+        if (data.unit_of_measure) form.append('unit_of_measure', String(data.unit_of_measure));
         if (data.cost_price !== undefined) form.append('cost_price', String(data.cost_price));
         if (data.sale_price !== undefined) form.append('sale_price', String(data.sale_price));
         if (data.status) form.append('status', String(data.status));
         form.append('photo', resolvedPhoto);
         await inventoryApi.createProduct(form as any);
       } else {
+        const { photo, photo_file, ...rest } = data as any;
         await inventoryApi.createProduct({
-          ...data,
+          ...rest,
+          category_id: data.category_id ? Number(data.category_id) : undefined,
           brand_id: data.brand_id ? Number(data.brand_id) : undefined,
           country_id: data.country_id ? Number(data.country_id) : undefined,
         } as any);
@@ -1353,16 +1487,20 @@ export const useStore = create<AppState>((set, get) => ({
         form.append('name', data.name ?? '');
         form.append('model_no', data.model_no ?? '');
         if (data.description) form.append('description', data.description);
+        if (data.category_id) form.append('category_id', String(data.category_id));
         if (data.brand_id) form.append('brand_id', String(data.brand_id));
         if (data.country_id) form.append('country_id', String(data.country_id));
+        if (data.unit_of_measure) form.append('unit_of_measure', String(data.unit_of_measure));
         if (data.cost_price !== undefined) form.append('cost_price', String(data.cost_price));
         if (data.sale_price !== undefined) form.append('sale_price', String(data.sale_price));
         if (data.status) form.append('status', String(data.status));
         form.append('photo', resolvedPhoto);
         await inventoryApi.updateProduct(Number(id), form as any);
       } else {
+        const { photo, photo_file, ...rest } = data as any;
         await inventoryApi.updateProduct(Number(id), {
-          ...data,
+          ...rest,
+          category_id: data.category_id ? Number(data.category_id) : undefined,
           brand_id: data.brand_id ? Number(data.brand_id) : undefined,
           country_id: data.country_id ? Number(data.country_id) : undefined,
         } as any);
@@ -1983,7 +2121,17 @@ export const useStore = create<AppState>((set, get) => ({
       'client.export': 'manage_users',
       'client.print': 'manage_users',
     };
-    const normalized = aliases[perm] ?? perm;
-    return get().rolePermissions[role]?.includes(normalized) || false;
+    
+    // Superadmin has access to everything
+    if (role?.toLowerCase() === 'superadmin') {
+      return true;
+    }
+    
+    // Get user's permissions from their profile
+    const userPermissions = get().currentUser.permissions ?? [];
+    
+    // Check ONLY the exact permission the user has
+    // This ensures granular permissions are respected
+    return userPermissions.includes(perm);
   }
 }));

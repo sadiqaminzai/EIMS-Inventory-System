@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
-import { Tenant, Purchase, Sale, Return, Product, Customer, Supplier } from '../../store';
+import { Tenant, Purchase, Sale, Return, Product, Customer, Supplier, Brand, Country, Category } from '../../store';
 
 // Helper types
 type TransactionType = 'Purchase' | 'Sale' | 'Return' | 'ReturnIn' | 'ReturnOut';
@@ -20,6 +20,149 @@ const toDataUrl = async (url: string): Promise<string | undefined> => {
   } catch {
     return undefined;
   }
+};
+
+export const generateProductInventoryPDF = async (params: {
+  title: string;
+  products: Product[];
+  tenant: Tenant;
+  brands: Brand[];
+  categories: Category[];
+  countries: Country[];
+}) => {
+  const { title, products, tenant, brands, categories, countries } = params;
+  const doc = new jsPDF({ orientation: 'landscape' });
+  const pageWidth = doc.internal.pageSize.width;
+  const pageHeight = doc.internal.pageSize.height;
+
+  const brandMap = new Map(brands.map((b) => [String(b.id), b.name]));
+  const categoryMap = new Map(categories.map((c) => [String(c.id), c.name]));
+  const countryMap = new Map(countries.map((c) => [String(c.id), c.name]));
+
+  const logoData = tenant.logo
+    ? (tenant.logo.startsWith('data:image/') ? tenant.logo : await toDataUrl(tenant.logo))
+    : undefined;
+
+  const reportTitle = title || 'Inventory Report';
+
+  const drawHeader = () => {
+    // Logo
+    if (logoData) {
+      try {
+        const format = logoData.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+        doc.addImage(logoData, format, 14, 10, 20, 20);
+      } catch {
+        // ignore logo failures
+      }
+    }
+
+    // Company Info
+    doc.setFontSize(18);
+    doc.setTextColor(40);
+    doc.text(tenant.name ?? '', 40, 18);
+
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    if (tenant.address) {
+      doc.text(String(tenant.address), 40, 24);
+    }
+    if (tenant.email || tenant.phone) {
+      doc.text(`${tenant.email ?? ''}${tenant.email && tenant.phone ? ' | ' : ''}${tenant.phone ?? ''}`, 40, 29);
+    }
+    if (tenant.license_no) {
+      doc.text(`License: ${tenant.license_no}`, 40, 34);
+    }
+
+    // Right Side Title + Date
+    doc.setFontSize(18);
+    doc.setTextColor(0, 102, 204);
+    doc.text(reportTitle.toUpperCase(), pageWidth - 14, 18, { align: 'right' });
+
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    doc.text(`Date: ${format(new Date(), 'MMM dd, yyyy')}`, pageWidth - 14, 24, { align: 'right' });
+
+    // Divider
+    doc.setDrawColor(200);
+    doc.line(14, 40, pageWidth - 14, 40);
+  };
+
+  const drawFooter = () => {
+    doc.setFontSize(8);
+    doc.setTextColor(150);
+    doc.text('Thank you for your business!', pageWidth / 2, pageHeight - 15, { align: 'center' });
+    doc.text(`Generated on ${format(new Date(), 'PPpp')}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+  };
+
+  const columns = [
+    'Photo',
+    'Product',
+    'Model No',
+    'Brand',
+    'Category',
+    'Sale Price',
+    'Country',
+    'Unit',
+    'Description'
+  ];
+
+  const photoByRow: Record<number, string | undefined> = {};
+  const rows = await Promise.all(products.map(async (p, index) => {
+    if (p.photo) {
+      const photoData = p.photo.startsWith('data:image/') ? p.photo : await toDataUrl(p.photo);
+      photoByRow[index] = photoData;
+    }
+
+    return [
+      '',
+      p.name ?? '',
+      p.model_no ?? '',
+      brandMap.get(String(p.brand_id)) ?? '',
+      p.category_id ? (categoryMap.get(String(p.category_id)) ?? '') : '',
+      Number(p.sale_price ?? 0).toFixed(2),
+      countryMap.get(String(p.country_id)) ?? '',
+      p.unit_of_measure ?? '',
+      p.description ?? ''
+    ];
+  }));
+
+  autoTable(doc, {
+    head: [columns],
+    body: rows as any[][],
+    startY: 46,
+    styles: { fontSize: 8, cellPadding: 2, minCellHeight: 14 },
+    columnStyles: {
+      0: { cellWidth: 18 },
+      1: { cellWidth: 35 },
+      2: { cellWidth: 20 },
+      3: { cellWidth: 24 },
+      4: { cellWidth: 26 },
+      5: { cellWidth: 20, halign: 'right' },
+      6: { cellWidth: 22 },
+      7: { cellWidth: 16 },
+      8: { cellWidth: 70 }
+    },
+    didDrawPage: () => {
+      drawHeader();
+      drawFooter();
+    },
+    didDrawCell: (data) => {
+      if (data.column.index === 0 && data.cell.section === 'body') {
+        const photo = photoByRow[data.row.index];
+        if (photo) {
+          try {
+            const format = photo.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+            doc.addImage(photo, format, data.cell.x + 1, data.cell.y + 1, 12, 12);
+          } catch {
+            // ignore image failures
+          }
+        }
+      }
+    }
+  });
+
+  const safeName = reportTitle.replace(/[^a-z0-9\s-]/gi, '').trim() || 'Inventory Report';
+  doc.save(`${safeName}.pdf`);
 };
 
 export const generateInvoicePDF = async (
@@ -368,6 +511,13 @@ export const generateInvoicePDF = async (
   doc.text("Thank you for your business!", pageWidth / 2, pageHeight - 15, { align: 'center' });
   doc.text(`Generated on ${format(new Date(), 'PPpp')}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
 
-  // Save
-  doc.save(`${type}_${data.invoice_no}.pdf`);
+  // Save with descriptive filename: "Sales Invoice 3 - Customer Name.pdf"
+  const invoiceTypeLabel = type === 'sale' ? 'Sales Invoice' 
+    : type === 'purchase' ? 'Purchase Invoice' 
+    : type === 'return_in' ? 'Sales Return' 
+    : type === 'return_out' ? 'Purchase Return' 
+    : `${type} Invoice`;
+  const partyName = party?.name ? ` - ${party.name.replace(/[<>:"/\\|?*]/g, '')}` : '';
+  const fileName = `${invoiceTypeLabel} ${data.invoice_no}${partyName}.pdf`;
+  doc.save(fileName);
 };

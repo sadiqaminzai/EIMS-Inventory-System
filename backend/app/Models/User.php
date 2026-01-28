@@ -16,6 +16,8 @@ class User extends Authenticatable
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasApiTokens, HasFactory, Notifiable, HasTenant, HasRoles;
 
+    protected string $guard_name = 'web';
+
     /**
      * The attributes that are mass assignable.
      *
@@ -69,6 +71,32 @@ class User extends Authenticatable
     public function tenant()
     {
         return $this->belongsTo(Tenant::class);
+    }
+
+    /**
+     * Check if the user has a specific role by name.
+     * This checks the role_id relationship, not Spatie's pivot table.
+     */
+    public function hasRole($roles, string $guard = null): bool
+    {
+        // Ensure role is loaded
+        if (!$this->relationLoaded('role')) {
+            $this->load('role');
+        }
+
+        if (is_string($roles)) {
+            return $this->role && strtolower($this->role->name) === strtolower($roles);
+        }
+
+        if (is_array($roles)) {
+            foreach ($roles as $roleName) {
+                if ($this->role && strtolower($this->role->name) === strtolower($roleName)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
 }

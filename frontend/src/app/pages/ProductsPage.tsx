@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useStore, Product } from '../../store';
 import { Modal } from '../components/ui/Modal';
@@ -7,9 +7,11 @@ import { DenseInput, DenseSelect } from '../components/ui/Form';
 import { DenseTable } from '../components/ui/DenseTable';
 import { ActionButtons } from '../components/ui/ActionButtons';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
-import { X, Save } from 'lucide-react';
+import { FileText, X, Save } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
+import { generateProductInventoryPDF } from '../utils/pdfGenerator';
 
 const ProductForm = ({ initialData, onSave, onCancel }: { initialData?: Product, onSave: (data: any) => void, onCancel: () => void }) => {
   const { brands, countries } = useStore();
@@ -50,6 +52,12 @@ const ProductForm = ({ initialData, onSave, onCancel }: { initialData?: Product,
 
         <DenseInput type="number" label="Cost Price" {...register('cost_price', { required: 'Required', min: 0 })} error={errors.cost_price?.message as string} />
         <DenseInput type="number" label="Sale Price" {...register('sale_price', { required: 'Required', min: 0 })} error={errors.sale_price?.message as string} />
+        <DenseInput label="Unit of Measure" {...register('unit_of_measure')} error={errors.unit_of_measure?.message as string} />
+        <DenseSelect 
+          label="Status" 
+          options={[{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }]}
+          {...register('status')} 
+        />
         
         <div className="col-span-1 md:col-span-2">
           <label className="text-[10px] font-semibold uppercase text-gray-500 block mb-1">Photo</label>
@@ -68,6 +76,8 @@ const ProductForm = ({ initialData, onSave, onCancel }: { initialData?: Product,
                           setSelectedFile(undefined);
                           setValue('photo', '');
                        }}
+                       aria-label="Remove product photo"
+                       title="Remove photo"
                        className="absolute top-0 right-0 bg-white/90 text-gray-500 p-0.5 hover:bg-red-500 hover:text-white transition-colors rounded-bl"
                      >
                        <X size={10} /> 
@@ -79,6 +89,8 @@ const ProductForm = ({ initialData, onSave, onCancel }: { initialData?: Product,
                     type="file" 
                     accept="image/*"
                     onChange={handleFileChange}
+                    aria-label="Upload product image"
+                    title="Upload product image"
                     className="block w-full text-[10px] text-slate-500
                       file:mr-2 file:py-1 file:px-2.5
                       file:rounded-md file:border-0
@@ -103,11 +115,6 @@ const ProductForm = ({ initialData, onSave, onCancel }: { initialData?: Product,
           />
         </div>
 
-        <DenseSelect 
-          label="Status" 
-          options={[{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }]}
-          {...register('status')} 
-        />
       </div>
 
       <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-gray-100">
@@ -123,11 +130,17 @@ const ProductForm = ({ initialData, onSave, onCancel }: { initialData?: Product,
 };
 
 export const ProductsPage = () => {
-  const { products, brands, countries, addProduct, updateProduct, deleteProduct, hasPermission, currentUser } = useStore();
+  const { products, brands, categories, countries, tenant, addProduct, updateProduct, deleteProduct, hasPermission, currentUser } = useStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | undefined>(undefined);
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [brandFilter, setBrandFilter] = useState('all');
+  const [countryFilter, setCountryFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const handleAdd = () => {
     setEditingProduct(undefined);
@@ -155,7 +168,97 @@ export const ProductsPage = () => {
     }
   };
 
+  const filteredProducts = useMemo(() => {
+    let result = [...products];
+
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      result = result.filter((p) => (
+        p.name?.toLowerCase().includes(term) ||
+        p.model_no?.toLowerCase().includes(term) ||
+        p.description?.toLowerCase().includes(term)
+      ));
+    }
+
+    if (brandFilter !== 'all') {
+      result = result.filter((p) => String(p.brand_id) === brandFilter);
+    }
+    if (countryFilter !== 'all') {
+      result = result.filter((p) => String(p.country_id) === countryFilter);
+    }
+    if (statusFilter !== 'all') {
+      result = result.filter((p) => p.status === statusFilter);
+    }
+
+    return result;
+  }, [products, searchTerm, brandFilter, countryFilter, statusFilter]);
+
+  const allFilteredSelected = filteredProducts.length > 0 && filteredProducts.every((p) => selectedIds.has(p.id));
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAllFiltered = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allFilteredSelected) {
+        filteredProducts.forEach((p) => next.delete(p.id));
+      } else {
+        filteredProducts.forEach((p) => next.add(p.id));
+      }
+      return next;
+    });
+  };
+
+  const handleExportPdf = async () => {
+    const exportItems = exportScope === 'selected'
+      ? filteredProducts.filter((p) => selectedIds.has(p.id))
+      : filteredProducts;
+
+    if (!exportItems.length) {
+      toast.info(exportScope === 'selected' ? 'Select at least one product to export.' : 'No products to export.');
+      return;
+    }
+
+    await generateProductInventoryPDF({
+      title: 'Inventory Report',
+      products: exportItems,
+      tenant,
+      brands,
+      categories,
+      countries
+    });
+  };
+
   const columns = [
+    {
+      header: (
+        <input
+          type="checkbox"
+          checked={allFilteredSelected}
+          onChange={toggleSelectAllFiltered}
+          aria-label="Select all filtered products"
+        />
+      ),
+      width: '40px',
+      cell: (item: Product) => (
+        <input
+          type="checkbox"
+          checked={selectedIds.has(item.id)}
+          onChange={() => toggleSelect(item.id)}
+          aria-label={`Select ${item.name}`}
+        />
+      )
+    },
     { 
       header: 'Info', 
       accessorKey: 'name' as keyof Product,
@@ -221,14 +324,90 @@ export const ProductsPage = () => {
   return (
     <>
       <DenseTable 
-        data={products} 
+        data={filteredProducts} 
         columns={columns} 
-        title="Product Inventory"
+        title="Inventory"
         onAdd={handleAdd}
         canAdd={hasPermission('product.create')}
         addLabel="Product"
-          canSearch={hasPermission('product.search')}
-          canExport={hasPermission('product.export')}
+        canSearch={false}
+        canExport={false}
+        canExportExcel={hasPermission('product.export')}
+        canExportPdf={false}
+        headerAfterSearch={
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              placeholder="Search products..."
+              aria-label="Search products"
+              className="pl-3 pr-3 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:outline-none w-full md:w-48 h-7"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            <select
+              className="text-xs border border-gray-300 rounded h-7 px-2"
+              value={brandFilter}
+              onChange={(e) => setBrandFilter(e.target.value)}
+              aria-label="Filter by brand"
+            >
+              <option value="all">All Brands</option>
+              {brands.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+            <select
+              className="text-xs border border-gray-300 rounded h-7 px-2"
+              value={countryFilter}
+              onChange={(e) => setCountryFilter(e.target.value)}
+              aria-label="Filter by country"
+            >
+              <option value="all">All Countries</option>
+              {countries.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <select
+              className="text-xs border border-gray-300 rounded h-7 px-2"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              aria-label="Filter by status"
+            >
+              <option value="all">All Status</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+            <div className="flex items-center gap-2 text-[10px] text-gray-600">
+              <label className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="exportScope"
+                  checked={exportScope === 'all'}
+                  onChange={() => setExportScope('all')}
+                />
+                All Filtered
+              </label>
+              <label className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="exportScope"
+                  checked={exportScope === 'selected'}
+                  onChange={() => setExportScope('selected')}
+                />
+                Selected Only
+              </label>
+            </div>
+            {hasPermission('product.export') && (
+              <button
+                onClick={handleExportPdf}
+                className="flex items-center gap-1.5 text-xs text-red-700 border border-red-200 rounded px-2 py-1 hover:bg-red-50"
+                title="Export PDF"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                PDF
+              </button>
+            )}
+          </div>
+        }
         defaultSort={{ key: 'created_at', direction: 'desc' }}
       />
       

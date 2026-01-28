@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Supplier;
+use App\Support\ModuleSequenceService;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -26,7 +27,10 @@ class SupplierController extends Controller
             'status' => ['nullable', 'string'],
         ]);
 
+        $serial = app(ModuleSequenceService::class)->next('supplier');
+
         $supplier = Supplier::create(array_merge($data, [
+            'serial_no' => (string) $serial,
             'created_by' => $request->user()->id,
             'updated_by' => $request->user()->id,
         ]));
@@ -55,6 +59,7 @@ class SupplierController extends Controller
     public function destroy(Supplier $supplier)
     {
         $supplier->delete();
+        app(ModuleSequenceService::class)->decrement('supplier');
 
         return response()->json(['message' => 'Deleted']);
     }

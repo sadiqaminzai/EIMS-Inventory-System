@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, Search, FileSpreadsheet, FileText, ArrowUpDown, ArrowUp, ArrowDown, PlusCircle } from 'lucide-react';
 import { clsx } from 'clsx';
 import jsPDF from 'jspdf';
@@ -6,9 +6,9 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 
 interface Column<T> {
-  header: string;
+  header: string | ReactNode;
   accessorKey?: keyof T;
-  cell?: (item: T) => React.ReactNode;
+  cell?: (item: T) => ReactNode;
   width?: string;
   sortable?: boolean;
 }
@@ -110,7 +110,7 @@ export const DenseTable = <T extends object>({
   // Export to PDF
   const exportToPDF = () => {
     const doc = new jsPDF();
-    const tableColumn = columns.map(c => c.header);
+    const tableColumn = columns.map(c => typeof c.header === 'string' ? c.header : '');
     const tableRows = sortedData.map(item => {
       return columns.map(col => {
         if (col.accessorKey) return item[col.accessorKey];

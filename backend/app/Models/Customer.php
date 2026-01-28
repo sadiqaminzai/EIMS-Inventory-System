@@ -12,6 +12,7 @@ class Customer extends Model
 
     protected $fillable = [
         'tenant_id',
+        'serial_no',
         'name',
         'email',
         'phone',

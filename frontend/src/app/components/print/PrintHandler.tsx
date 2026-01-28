@@ -5,14 +5,26 @@ import { Sale, Purchase, Return } from '../../../store';
 interface PrintHandlerProps {
   data: Sale | Purchase | Return;
   type: 'sale' | 'purchase' | 'return' | 'return_in' | 'return_out';
+  partyName?: string;
   onAfterPrint?: () => void;
 }
 
-export const PrintHandler = ({ data, type, onAfterPrint }: PrintHandlerProps) => {
+export const PrintHandler = ({ data, type, partyName, onAfterPrint }: PrintHandlerProps) => {
   useEffect(() => {
     if (data) {
+      // Set document title for PDF filename
+      const originalTitle = document.title;
+      const invoiceTypeLabel = type === 'sale' ? 'Sales Invoice' 
+        : type === 'purchase' ? 'Purchase Invoice' 
+        : type === 'return_in' ? 'Sales Return' 
+        : type === 'return_out' ? 'Purchase Return' 
+        : `${type} Invoice`;
+      const partyPart = partyName ? ` - ${partyName}` : '';
+      document.title = `${invoiceTypeLabel} ${data.invoice_no}${partyPart}`;
+
       // Handler for when the print dialog is closed (either printed or cancelled)
       const handleAfterPrint = () => {
+         document.title = originalTitle;
          onAfterPrint();
       };
 
@@ -29,9 +41,10 @@ export const PrintHandler = ({ data, type, onAfterPrint }: PrintHandlerProps) =>
       return () => {
         clearTimeout(timer);
         window.removeEventListener('afterprint', handleAfterPrint);
+        document.title = originalTitle;
       };
     }
-  }, [data, onAfterPrint]);
+  }, [data, type, partyName, onAfterPrint]);
 
   if (!data) return null;
 

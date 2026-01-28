@@ -17,7 +17,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '../components/ui/toolti
 import { generateInvoicePDF } from '../utils/pdfGenerator';
 
 const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSave: (data: any) => void, onCancel: () => void }) => {
-  const { customers, suppliers, products, currentUser, sales, purchases, returns, printSettings } = useStore();
+  const { customers, suppliers, products, currentUser, sales, purchases, returns, printSettings, hasPermission } = useStore();
   const resolveType = (s: Sale) => (s.invoice_type || 'sale') as 'sale' | 'purchase' | 'return_in' | 'return_out';
   const getNextId = (type: 'sale' | 'purchase' | 'return_in' | 'return_out') => {
     const filtered = sales.filter(s => resolveType(s) === type);
@@ -215,7 +215,10 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
         .sort((a, b) => {
           if (a.batch_no === 'N/A' && b.batch_no !== 'N/A') return -1;
           if (a.batch_no !== 'N/A' && b.batch_no === 'N/A') return 1;
-          return new Date(a.date).getTime() - new Date(b.date).getTime();
+          // Sort by batch_no numerically for FIFO
+          const aBatch = parseInt(a.batch_no) || 0;
+          const bBatch = parseInt(b.batch_no) || 0;
+          return aBatch - bBatch;
         });
     }
     const batchMap = new Map<string, { qty: number, exp: string, date: string }>();
@@ -271,7 +274,10 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
         .sort((a, b) => {
           if (a.batch_no === 'N/A' && b.batch_no !== 'N/A') return -1;
           if (a.batch_no !== 'N/A' && b.batch_no === 'N/A') return 1;
-          return new Date(a.date).getTime() - new Date(b.date).getTime();
+          // Sort by batch_no numerically for FIFO
+          const aBatch = parseInt(a.batch_no) || 0;
+          const bBatch = parseInt(b.batch_no) || 0;
+          return aBatch - bBatch;
         });
   };
 
@@ -599,7 +605,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
           </div>
           <div className="absolute left-40 top-1/2 -translate-y-1/2 flex items-center gap-1">
             <span className="text-gray-500">Total Stock:</span>
-            <span className="font-bold text-gray-600">{items.reduce((sum, item) => sum + (item.product_id ? getTotalStock(item.product_id) : 0), 0)}</span>
+            <span className="font-bold text-gray-600">{[...new Set(items.map(i => i.product_id).filter(Boolean))].reduce((sum, pid) => sum + getTotalStock(pid), 0)}</span>
           </div>
           {printSettings?.show_bonus && (
             <div className="absolute left-64 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -885,7 +891,12 @@ export const SalesPage = () => {
       {printData && (
         <PrintHandler 
             data={printData} 
-            type={resolveInvoiceType(printData) as any} 
+            type={resolveInvoiceType(printData) as any}
+            partyName={
+              resolveInvoiceType(printData) === 'purchase' || resolveInvoiceType(printData) === 'return_out'
+                ? suppliers.find(s => s.id === printData.supplier_id)?.name
+                : customers.find(c => c.id === printData.customer_id)?.name
+            }
             onAfterPrint={() => setPrintData(null)} 
         />
       )}

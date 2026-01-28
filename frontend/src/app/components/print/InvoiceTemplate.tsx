@@ -151,7 +151,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
         @media print {
             @page { 
                 margin: 0; 
-                size: auto; 
+                size: A4; 
             }
             
             body { 
@@ -358,8 +358,8 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                         )}
                 </div>
         
-                <div className="text-center text-[10px] text-gray-400 mt-4">
-                         <p>This is a computer generated invoice.</p>
+                <div className="text-center text-[8px] text-gray-400 mt-4 italic">
+                         <p>Powered by: Soft Care IT Solutions - Kabul Afghanistan. +93 789 68 10 10 | +93 70 102 1319 | +93 78 979 5964 | softcareitsolutions.com</p>
                 </div>
             </div>
     </div>
