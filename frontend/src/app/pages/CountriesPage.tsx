@@ -8,7 +8,7 @@ import { DenseTable } from '../components/ui/DenseTable';
 import { ActionButtons } from '../components/ui/ActionButtons';
 import { Button } from '../components/ui/button';
 import { Save, X } from 'lucide-react';
-import { format } from 'date-fns';
+import { formatDateTime } from '../utils/dateTime';
 
 const CountryForm = ({ initialData, onSave, onCancel }: { initialData?: Country, onSave: (data: any) => void, onCancel: () => void }) => {
   const { register, handleSubmit, formState: { errors } } = useForm({ defaultValues: initialData || { status: 'active' } });
@@ -73,7 +73,7 @@ export const CountriesPage = () => {
       header: 'Created At', 
       accessorKey: 'created_at' as keyof Country, 
       sortable: true,
-      cell: (i: Country) => i.created_at ? format(new Date(i.created_at), 'yyyy-MM-dd HH:mm') : '-'
+      cell: (i: Country) => formatDateTime(i.created_at)
     },
     { 
       header: 'Status', 
@@ -146,7 +146,7 @@ export const CountriesPage = () => {
                     </div>
                     <div>
                          <span className="block font-semibold">Created At</span>
-                         {viewCountry.created_at ? format(new Date(viewCountry.created_at), 'yyyy-MM-dd HH:mm') : '-'}
+                         {formatDateTime(viewCountry.created_at)}
                     </div>
                      <div>
                         <span className="block font-semibold">Updated By</span>
@@ -154,7 +154,7 @@ export const CountriesPage = () => {
                     </div>
                     <div>
                          <span className="block font-semibold">Updated At</span>
-                         {viewCountry.updated_at ? format(new Date(viewCountry.updated_at), 'yyyy-MM-dd HH:mm') : '-'}
+                         {formatDateTime(viewCountry.updated_at)}
                     </div>
                 </div>
 

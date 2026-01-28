@@ -95,10 +95,7 @@ export const LoginPage = () => {
               </div>
               
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label className="text-gray-300 text-xs uppercase tracking-wider">Password</Label>
-                  <a href="#" className="text-xs text-blue-400 hover:text-blue-300">Forgot?</a>
-                </div>
+                <Label className="text-gray-300 text-xs uppercase tracking-wider">Password</Label>
                 <div className="relative group">
                   <Lock className="absolute left-3 top-2.5 h-5 w-5 text-gray-500 group-focus-within:text-blue-400 transition-colors" />
                   <input 
@@ -119,6 +116,10 @@ export const LoginPage = () => {
                 {isLoading ? 'Signing in...' : 'Sign In'}
               </Button>
             </form>
+            
+            <div className="text-center">
+              <a href="#" className="text-sm text-blue-400 hover:text-blue-300">Forgot password?</a>
+            </div>
 
           </div>
           

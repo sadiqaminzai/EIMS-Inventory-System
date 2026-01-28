@@ -16,6 +16,7 @@ import { nanoid } from 'nanoid';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { format, addYears, addMonths } from 'date-fns';
+import { formatDateTime } from '../utils/dateTime';
 import { toast } from 'sonner';
 
 // --- Components for General Tab ---
@@ -1623,7 +1624,7 @@ const BackupsTab = () => {
                 {item.status}
             </span>
         )},
-        { header: 'Created', accessorKey: 'created_at', cell: (item: BackupDto) => format(new Date(item.created_at), 'MMM dd, yyyy HH:mm') },
+        { header: 'Created', accessorKey: 'created_at', cell: (item: BackupDto) => formatDateTime(item.created_at, 'MMM dd, yyyy h:mm a') },
         {
             header: 'Actions',
             width: '160px',
@@ -1733,14 +1734,14 @@ const BackupsTab = () => {
                         {settings.last_backup_at && (
                             <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
                                 <div className="text-[11px] uppercase tracking-wide text-gray-500">Last Backup</div>
-                                <div className="text-sm font-medium text-gray-900 mt-1">{format(new Date(settings.last_backup_at), 'MMM dd, yyyy HH:mm')}</div>
+                                <div className="text-sm font-medium text-gray-900 mt-1">{formatDateTime(settings.last_backup_at, 'MMM dd, yyyy h:mm a')}</div>
                             </div>
                         )}
 
                         {settings.next_backup_at && (
                             <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
                                 <div className="text-[11px] uppercase tracking-wide text-gray-500">Next Backup</div>
-                                <div className="text-sm font-medium text-gray-900 mt-1">{format(new Date(settings.next_backup_at), 'MMM dd, yyyy HH:mm')}</div>
+                                <div className="text-sm font-medium text-gray-900 mt-1">{formatDateTime(settings.next_backup_at, 'MMM dd, yyyy h:mm a')}</div>
                             </div>
                         )}
 

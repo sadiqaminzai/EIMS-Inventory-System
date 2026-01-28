@@ -8,7 +8,7 @@ return new class extends Migration
     public function up(): void
     {
         DB::statement(<<<SQL
-            CREATE OR REPLACE VIEW view_product_stock AS
+            CREATE VIEW view_product_stock AS
             SELECT
                 tenant_id,
                 product_id,

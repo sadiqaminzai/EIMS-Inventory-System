@@ -143,6 +143,12 @@ Route::prefix('v1')->middleware(['api'])->group(function () {
             ->middleware('permission:manage_orders|return_out.edit');
         Route::delete('/transactions/return-out/{order}', [TransactionController::class, 'deleteReturnOut'])
             ->middleware('permission:manage_orders|return_out.delete');
+        Route::post('/transactions/quotation', [TransactionController::class, 'quotation'])
+            ->middleware('permission:manage_orders|sales.create');
+        Route::put('/transactions/quotation/{order}', [TransactionController::class, 'updateQuotation'])
+            ->middleware('permission:manage_orders|sales.edit');
+        Route::delete('/transactions/quotation/{order}', [TransactionController::class, 'deleteQuotation'])
+            ->middleware('permission:manage_orders|sales.delete');
         Route::get('/transactions', [TransactionController::class, 'history'])
             ->middleware('permission:manage_orders|purchase.view|sales.view');
     });

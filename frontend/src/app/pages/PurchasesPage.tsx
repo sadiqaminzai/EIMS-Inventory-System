@@ -8,6 +8,7 @@ import { DenseTable } from '../components/ui/DenseTable';
 import { ActionButtons } from '../components/ui/ActionButtons';
 import { Trash2, Plus, Printer, Save, X } from 'lucide-react';
 import { format } from 'date-fns';
+import { formatDateTime } from '../utils/dateTime';
 import { InvoiceTemplate } from '../components/print/InvoiceTemplate';
 import { PrintHandler } from '../components/print/PrintHandler';
 import { Button } from '../components/ui/button';
@@ -18,12 +19,15 @@ const PurchaseForm = ({ initialData, onSave, onCancel }: { initialData?: Purchas
   const { suppliers, products, currentUser, purchases, printSettings } = useStore();
   const nextId = purchases.length > 0 ? Math.max(...purchases.map(p => parseInt(p.invoice_no) || 0)) + 1 : 1;
   
-  const { register, control, handleSubmit, setValue, watch, setFocus, formState: { errors } } = useForm({
+  const emptyItem = { product_id: '', batch_no: '', quantity: 1, bonus: 0, cost_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, mfg_date: '', exp_date: '' };
+
+  const { register, control, handleSubmit, setValue, watch, setFocus, formState: { errors }, getValues } = useForm({
+    shouldUnregister: true,
     defaultValues: initialData || {
       supplier_id: '',
       purchase_date: format(new Date(), 'yyyy-MM-dd'),
       invoice_no: nextId.toString(),
-      items: [{ product_id: '', batch_no: '', quantity: 1, bonus: 0, cost_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, mfg_date: '', exp_date: '' }],
+      items: [emptyItem],
       sub_total: 0,
       total_discount: 0,
       total_tax: 0,
@@ -33,8 +37,18 @@ const PurchaseForm = ({ initialData, onSave, onCancel }: { initialData?: Purchas
     }
   });
 
-  const { fields, append, remove } = useFieldArray({ control, name: 'items' });
+  const { fields, append, remove, replace } = useFieldArray({ control, name: 'items' });
   const items = watch('items');
+
+  const handleRemoveItem = (index: number) => {
+    const current = getValues('items') || [];
+    const next = current.filter((_: any, i: number) => i !== index);
+    if (next.length === 0) {
+      replace([emptyItem]);
+    } else {
+      replace(next);
+    }
+  };
 
   // Auto-calculate totals
   useEffect(() => {
@@ -82,7 +96,7 @@ const PurchaseForm = ({ initialData, onSave, onCancel }: { initialData?: Purchas
   const handleKeyDown = (e: React.KeyboardEvent, index: number) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      append({ product_id: '', batch_no: '', quantity: 1, bonus: 0, cost_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, mfg_date: '', exp_date: '' });
+      append(emptyItem);
       // Small timeout to allow render
       setTimeout(() => {
         setFocus(`items.${index + 1}.product_id`);
@@ -114,7 +128,7 @@ const PurchaseForm = ({ initialData, onSave, onCancel }: { initialData?: Purchas
             type="button" 
             variant="ghost" 
             size="sm"
-            onClick={() => append({ product_id: '', batch_no: '', quantity: 1, bonus: 0, cost_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, mfg_date: '', exp_date: '' })} 
+            onClick={() => append(emptyItem)} 
             className="text-blue-600 hover:text-blue-800 h-8"
           >
             <Plus className="h-3 w-3 mr-1" /> Add Item
@@ -176,7 +190,7 @@ const PurchaseForm = ({ initialData, onSave, onCancel }: { initialData?: Purchas
                   <td className="px-2 py-1"><input type="number" step="0.01" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.tax_percent`, { valueAsNumber: true })} onKeyDown={(e) => handleKeyDown(e, index)} /></td>
                   <td className="px-2 py-1 font-medium text-right text-gray-700">{items[index]?.amount?.toFixed(2)}</td>
                   <td className="px-2 py-1 text-center">
-                    <button type="button" onClick={() => remove(index)} className="text-red-500 hover:bg-red-100 p-1 rounded"><Trash2 className="h-3 w-3" /></button>
+                    <button type="button" onClick={() => handleRemoveItem(index)} className="text-red-500 hover:bg-red-100 p-1 rounded"><Trash2 className="h-3 w-3" /></button>
                   </td>
                 </tr>
               ))}
@@ -385,7 +399,7 @@ export const PurchasesPage = () => {
                       </div>
                       <div>
                         <span className="block font-semibold">Created At</span>
-                        {viewPurchase.created_at ? format(new Date(viewPurchase.created_at), 'yyyy-MM-dd HH:mm') : '-'}
+                        {formatDateTime(viewPurchase.created_at)}
                       </div>
                       <div>
                         <span className="block font-semibold">Updated By</span>
@@ -393,7 +407,7 @@ export const PurchasesPage = () => {
                       </div>
                       <div>
                         <span className="block font-semibold">Updated At</span>
-                        {viewPurchase.updated_at ? format(new Date(viewPurchase.updated_at), 'yyyy-MM-dd HH:mm') : '-'}
+                        {formatDateTime(viewPurchase.updated_at)}
                       </div>
                     </div>
                     <div className="flex justify-end gap-2">

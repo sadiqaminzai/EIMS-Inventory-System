@@ -8,6 +8,7 @@ import { DenseTable } from '../components/ui/DenseTable';
 import { ActionButtons } from '../components/ui/ActionButtons';
 import { Trash2, Plus, Printer, Save, X } from 'lucide-react';
 import { format } from 'date-fns';
+import { formatDateTime } from '../utils/dateTime';
 import { InvoiceTemplate } from '../components/print/InvoiceTemplate';
 import { PrintHandler } from '../components/print/PrintHandler';
 import { Button } from '../components/ui/button';
@@ -18,12 +19,15 @@ const ReturnForm = ({ initialData, onSave, onCancel }: { initialData?: Return, o
   const { customers, products, currentUser, returns, purchases, printSettings } = useStore();
   const nextId = returns.length > 0 ? Math.max(...returns.map(r => parseInt(r.invoice_no) || 0)) + 1 : 1;
 
-  const { register, control, handleSubmit, setValue, watch, setFocus, formState: { errors } } = useForm({
+  const emptyItem = { product_id: '', batch_no: '', quantity: 1, sale_price: 0, amount: 0, bonus: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, exp_date: '' };
+
+  const { register, control, handleSubmit, setValue, watch, setFocus, formState: { errors }, getValues } = useForm({
+    shouldUnregister: true,
     defaultValues: initialData || {
       customer_id: '',
       return_date: format(new Date(), 'yyyy-MM-dd'),
       invoice_no: nextId.toString(),
-      items: [{ product_id: '', batch_no: '', quantity: 1, sale_price: 0, amount: 0, bonus: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, exp_date: '' }],
+      items: [emptyItem],
       sub_total: 0,
       total_discount: 0,
       total_tax: 0,
@@ -32,8 +36,18 @@ const ReturnForm = ({ initialData, onSave, onCancel }: { initialData?: Return, o
     }
   });
 
-  const { fields, append, remove } = useFieldArray({ control, name: 'items' });
+  const { fields, append, remove, replace } = useFieldArray({ control, name: 'items' });
   const items = watch('items');
+
+  const handleRemoveItem = (index: number) => {
+    const current = getValues('items') || [];
+    const next = current.filter((_: any, i: number) => i !== index);
+    if (next.length === 0) {
+      replace([emptyItem]);
+    } else {
+      replace(next);
+    }
+  };
 
   useEffect(() => {
     let sub = 0;
@@ -90,7 +104,7 @@ const ReturnForm = ({ initialData, onSave, onCancel }: { initialData?: Return, o
   const handleKeyDown = (e: React.KeyboardEvent, index: number) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      append({ product_id: '', batch_no: '', quantity: 1, sale_price: 0, amount: 0, bonus: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, exp_date: '' });
+      append(emptyItem);
       setTimeout(() => {
         setFocus(`items.${index + 1}.product_id`);
       }, 50);
@@ -167,7 +181,7 @@ const ReturnForm = ({ initialData, onSave, onCancel }: { initialData?: Return, o
                 <td className="px-2 py-1"><input type="number" step="0.01" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.tax_percent`, { valueAsNumber: true })} onKeyDown={(e) => handleKeyDown(e, index)} /></td>
                 <td className="px-2 py-1 text-right font-medium text-gray-700">${items[index]?.amount?.toFixed(2)}</td>
                 <td className="px-2 py-1 text-center">
-                  <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} className="h-6 w-6 text-red-500 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-3 w-3" /></Button>
+                  <Button type="button" variant="ghost" size="icon" onClick={() => handleRemoveItem(index)} className="h-6 w-6 text-red-500 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-3 w-3" /></Button>
                 </td>
               </tr>
             ))}
@@ -175,7 +189,7 @@ const ReturnForm = ({ initialData, onSave, onCancel }: { initialData?: Return, o
         </table>
       </div>
       <div className="mt-2">
-        <Button type="button" variant="ghost" size="sm" onClick={() => append({ product_id: '', batch_no: '', quantity: 1, sale_price: 0, amount: 0, bonus: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, exp_date: '' })} className="text-blue-600 hover:text-blue-800">
+        <Button type="button" variant="ghost" size="sm" onClick={() => append(emptyItem)} className="text-blue-600 hover:text-blue-800">
           <Plus className="h-3 w-3 mr-1" /> Add Item
         </Button>
       </div>
@@ -354,7 +368,7 @@ export const ReturnsPage = () => {
                       </div>
                       <div>
                         <span className="block font-semibold">Created At</span>
-                        {viewReturn.created_at ? format(new Date(viewReturn.created_at), 'yyyy-MM-dd HH:mm') : '-'}
+                        {formatDateTime(viewReturn.created_at)}
                       </div>
                       <div>
                         <span className="block font-semibold">Updated By</span>
@@ -362,7 +376,7 @@ export const ReturnsPage = () => {
                       </div>
                       <div>
                         <span className="block font-semibold">Updated At</span>
-                        {viewReturn.updated_at ? format(new Date(viewReturn.updated_at), 'yyyy-MM-dd HH:mm') : '-'}
+                        {formatDateTime(viewReturn.updated_at)}
                       </div>
                     </div>
                     <div className="flex justify-end gap-2">

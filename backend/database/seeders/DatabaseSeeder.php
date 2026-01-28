@@ -84,7 +84,7 @@ class DatabaseSeeder extends Seeder
 
         $superAdmin = User::updateOrCreate([
             'tenant_id' => $tenant->id,
-            'email' => 'superadmin@example.com',
+            'email' => 'superadmin@softcareitsolution.com',
         ], [
             'name' => 'Super Admin',
             'password' => Hash::make('password'),

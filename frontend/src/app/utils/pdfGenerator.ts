@@ -1,10 +1,11 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
+import { formatDateTimeLong } from './dateTime';
 import { Tenant, Purchase, Sale, Return, Product, Customer, Supplier, Brand, Country, Category } from '../../store';
 
 // Helper types
-type TransactionType = 'Purchase' | 'Sale' | 'Return' | 'ReturnIn' | 'ReturnOut';
+type TransactionType = 'Purchase' | 'Sale' | 'Return' | 'ReturnIn' | 'ReturnOut' | 'Quotation';
 
 const toDataUrl = async (url: string): Promise<string | undefined> => {
   try {
@@ -91,7 +92,7 @@ export const generateProductInventoryPDF = async (params: {
     doc.setFontSize(8);
     doc.setTextColor(150);
     doc.text('Thank you for your business!', pageWidth / 2, pageHeight - 15, { align: 'center' });
-    doc.text(`Generated on ${format(new Date(), 'PPpp')}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+    doc.text(`Generated on ${formatDateTimeLong(new Date())}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
   };
 
   const columns = [
@@ -99,7 +100,6 @@ export const generateProductInventoryPDF = async (params: {
     'Product',
     'Model No',
     'Brand',
-    'Category',
     'Sale Price',
     'Country',
     'Unit',
@@ -118,7 +118,6 @@ export const generateProductInventoryPDF = async (params: {
       p.name ?? '',
       p.model_no ?? '',
       brandMap.get(String(p.brand_id)) ?? '',
-      p.category_id ? (categoryMap.get(String(p.category_id)) ?? '') : '',
       Number(p.sale_price ?? 0).toFixed(2),
       countryMap.get(String(p.country_id)) ?? '',
       p.unit_of_measure ?? '',
@@ -133,14 +132,13 @@ export const generateProductInventoryPDF = async (params: {
     styles: { fontSize: 8, cellPadding: 2, minCellHeight: 14 },
     columnStyles: {
       0: { cellWidth: 18 },
-      1: { cellWidth: 35 },
-      2: { cellWidth: 20 },
-      3: { cellWidth: 24 },
-      4: { cellWidth: 26 },
-      5: { cellWidth: 20, halign: 'right' },
-      6: { cellWidth: 22 },
-      7: { cellWidth: 16 },
-      8: { cellWidth: 70 }
+      1: { cellWidth: 40 },
+      2: { cellWidth: 25 },
+      3: { cellWidth: 28 },
+      4: { cellWidth: 22, halign: 'right' },
+      5: { cellWidth: 25 },
+      6: { cellWidth: 18 },
+      7: { cellWidth: 75 }
     },
     didDrawPage: () => {
       drawHeader();
@@ -268,7 +266,9 @@ export const generateInvoicePDF = async (
       ? 'PURCHASE RETURN'
       : type === 'Sale'
         ? 'SALES INVOICE'
-        : 'SALES RETURN';
+        : type === 'Quotation'
+          ? 'QUOTATION'
+          : 'SALES RETURN';
   doc.text(title, pageWidth - 14, contentStartY + 2, { align: 'right' });
 
   doc.setFontSize(10);
@@ -509,7 +509,7 @@ export const generateInvoicePDF = async (
   doc.setFontSize(8);
   doc.setTextColor(150);
   doc.text("Thank you for your business!", pageWidth / 2, pageHeight - 15, { align: 'center' });
-  doc.text(`Generated on ${format(new Date(), 'PPpp')}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+  doc.text(`Generated on ${formatDateTimeLong(new Date())}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
 
   // Save with descriptive filename: "Sales Invoice 3 - Customer Name.pdf"
   const invoiceTypeLabel = type === 'sale' ? 'Sales Invoice' 

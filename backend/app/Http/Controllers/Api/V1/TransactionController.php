@@ -13,6 +13,7 @@ use App\Models\Supplier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Support\Carbon;
 use App\Support\ModuleSequenceService;
 use Illuminate\Validation\ValidationException;
 
@@ -52,9 +53,160 @@ class TransactionController extends Controller
                 ->exists();
 
             if ($hasUsage) {
-                throw ValidationException::withMessages([
-                    'purchase' => ['Cannot edit this purchase because stock has been used.'],
-                ]);
+                $logsByItem = InventoryLog::whereIn('order_item_id', $orderItemIds)
+                    ->get()
+                    ->groupBy('order_item_id');
+
+                $usedBatchIds = InventoryBatch::whereIn('id', $batchIds)
+                    ->whereColumn('quantity_remaining', '<', 'quantity_initial')
+                    ->pluck('id')
+                    ->flip();
+
+                $existingItems = $orderItems->values()->map(function ($existing) use ($logsByItem, $usedBatchIds) {
+                    $existingExp = $existing->exp_date ? Carbon::parse($existing->exp_date)->toDateString() : '';
+                    $key = implode('|', [
+                        (int) $existing->product_id,
+                        (string) ($existing->batch_no ?? ''),
+                        (string) $existingExp,
+                        (int) $existing->quantity,
+                        (int) ($existing->bonus ?? 0),
+                        (float) $existing->unit_price,
+                    ]);
+
+                    $logs = $logsByItem->get($existing->id, collect());
+                    $used = $logs->contains(fn ($log) => $usedBatchIds->has($log->batch_id));
+
+                    return [
+                        'item' => $existing,
+                        'key' => $key,
+                        'used' => $used,
+                    ];
+                })->values();
+
+                $matched = [];
+                $matchedUpdates = [];
+                $newItems = [];
+
+                foreach ($data['items'] as $item) {
+                    $incomingExp = $item['expiry_date'] ?? '';
+                    $incomingKey = implode('|', [
+                        (int) $item['product_id'],
+                        (string) ($item['batch_no'] ?? ''),
+                        (string) $incomingExp,
+                        (int) $item['quantity'],
+                        (int) ($item['bonus'] ?? 0),
+                        (float) $item['unit_price'],
+                    ]);
+
+                    $matchIndex = null;
+                    foreach ($existingItems as $index => $existing) {
+                        if (($matched[$index] ?? false) === true) {
+                            continue;
+                        }
+                        if ($existing['key'] === $incomingKey) {
+                            $matchIndex = $index;
+                            break;
+                        }
+                    }
+
+                    if ($matchIndex === null) {
+                        $newItems[] = $item;
+                        continue;
+                    }
+
+                    $matched[$matchIndex] = true;
+                    $matchedUpdates[] = [
+                        'existing' => $existingItems[$matchIndex],
+                        'incoming' => $item,
+                    ];
+                }
+
+                $unmatchedExisting = $existingItems->filter(function ($_, $index) use ($matched) {
+                    return ! ($matched[$index] ?? false);
+                })->values();
+
+                $hasUsedUnmatched = $unmatchedExisting->contains(fn ($entry) => $entry['used'] === true);
+                if ($hasUsedUnmatched) {
+                    throw ValidationException::withMessages([
+                        'purchase' => ['Cannot edit purchase items because stock has been used.'],
+                    ]);
+                }
+
+                $removeItemIds = $unmatchedExisting->map(fn ($entry) => $entry['item']->id);
+                if ($removeItemIds->isNotEmpty()) {
+                    $removeBatchIds = InventoryLog::whereIn('order_item_id', $removeItemIds)
+                        ->pluck('batch_id')
+                        ->unique();
+
+                    InventoryLog::whereIn('order_item_id', $removeItemIds)->delete();
+                    InventoryBatch::whereIn('id', $removeBatchIds)->delete();
+                    OrderItem::whereIn('id', $removeItemIds)->delete();
+                }
+
+                foreach ($matchedUpdates as $update) {
+                    $existing = $update['existing']['item'];
+                    $item = $update['incoming'];
+
+                    $existing->update([
+                        'discount' => $item['discount'] ?? 0,
+                        'discount_percent' => $item['discount_percent'] ?? 0,
+                        'tax' => $item['tax'] ?? 0,
+                        'tax_percent' => $item['tax_percent'] ?? 0,
+                        'total_price' => ($item['quantity'] * $item['unit_price']),
+                        'updated_by' => $request->user()->id,
+                    ]);
+                }
+
+                foreach ($newItems as $item) {
+                    $product = Product::findOrFail($item['product_id']);
+                    $totalPrice = $item['quantity'] * $item['unit_price'];
+                    $qtyWithBonus = $item['quantity'] + ($item['bonus'] ?? 0);
+
+                    $orderItem = OrderItem::create([
+                        'order_id' => $order->id,
+                        'product_id' => $product->id,
+                        'batch_no' => $item['batch_no'] ?? null,
+                        'exp_date' => $item['expiry_date'] ?? null,
+                        'quantity' => $item['quantity'],
+                        'bonus' => $item['bonus'] ?? 0,
+                        'discount' => $item['discount'] ?? 0,
+                        'discount_percent' => $item['discount_percent'] ?? 0,
+                        'tax' => $item['tax'] ?? 0,
+                        'tax_percent' => $item['tax_percent'] ?? 0,
+                        'unit_price' => $item['unit_price'],
+                        'total_price' => $totalPrice,
+                        'created_at' => now(),
+                        'created_by' => $request->user()->id,
+                        'updated_by' => $request->user()->id,
+                    ]);
+
+                    $batch = $this->upsertInventoryBatch($product, $item, $data['date'], $request, $qtyWithBonus, $supplier->id);
+
+                    $runningBalance = InventoryBatch::where('product_id', $product->id)
+                        ->sum('quantity_remaining');
+
+                    InventoryLog::create([
+                        'transaction_type' => 'in',
+                        'order_item_id' => $orderItem->id,
+                        'batch_id' => $batch->id,
+                        'quantity_change' => $qtyWithBonus,
+                        'running_balance' => $runningBalance,
+                        'created_at' => now(),
+                        'created_by' => $request->user()->id,
+                        'updated_by' => $request->user()->id,
+                    ]);
+                }
+
+                $totals = $this->calculateTotals($data['items'], (float) ($data['paid_amount'] ?? 0));
+                $order->update(array_merge($totals, [
+                    'party_id' => $supplier->id,
+                    'party_type' => Supplier::class,
+                    'transaction_date' => $data['date'],
+                    'notes' => $data['notes'] ?? null,
+                    'updated_by' => $request->user()->id,
+                ]));
+
+                return $order;
             }
 
             InventoryLog::whereIn('order_item_id', $orderItemIds)->delete();
@@ -513,6 +665,142 @@ class TransactionController extends Controller
         return response()->json($order->load('items'), 201);
     }
 
+    public function quotation(Request $request)
+    {
+        $data = $this->validateOrder($request);
+        $customer = Customer::findOrFail($data['party_id']);
+
+        $order = DB::transaction(function () use ($data, $customer, $request) {
+            $serialNo = $this->getNextSerialNo('quotation');
+            $order = Order::create([
+                'transaction_type' => 'quotation',
+                'serial_no' => $serialNo,
+                'user_id' => $request->user()->id,
+                'party_type' => Customer::class,
+                'party_id' => $customer->id,
+                'status' => 'completed',
+                'total_amount' => 0,
+                'notes' => $data['notes'] ?? null,
+                'transaction_date' => $data['date'],
+                'created_by' => $request->user()->id,
+                'updated_by' => $request->user()->id,
+            ]);
+
+            $total = 0;
+
+            foreach ($data['items'] as $item) {
+                $product = Product::findOrFail($item['product_id']);
+                $totalPrice = $item['quantity'] * $item['unit_price'];
+
+                OrderItem::create([
+                    'order_id' => $order->id,
+                    'product_id' => $product->id,
+                    'batch_no' => $item['batch_no'] ?? null,
+                    'exp_date' => $item['expiry_date'] ?? null,
+                    'quantity' => $item['quantity'],
+                    'bonus' => $item['bonus'] ?? 0,
+                    'discount' => $item['discount'] ?? 0,
+                    'discount_percent' => $item['discount_percent'] ?? 0,
+                    'tax' => $item['tax'] ?? 0,
+                    'tax_percent' => $item['tax_percent'] ?? 0,
+                    'unit_price' => $item['unit_price'],
+                    'total_price' => $totalPrice,
+                    'created_at' => now(),
+                    'created_by' => $request->user()->id,
+                    'updated_by' => $request->user()->id,
+                ]);
+
+                $total += $totalPrice;
+            }
+
+            $totals = $this->calculateTotals($data['items'], (float) ($data['paid_amount'] ?? 0));
+            $order->update(array_merge($totals, [
+                'updated_by' => $request->user()->id,
+            ]));
+
+            return $order;
+        });
+
+        return response()->json($order->load('items'), 201);
+    }
+
+    public function updateQuotation(Request $request, Order $order)
+    {
+        if ($order->transaction_type !== 'quotation') {
+            return response()->json(['message' => 'Invalid order type'], 422);
+        }
+
+        $data = $this->validateOrder($request);
+        $customer = Customer::findOrFail($data['party_id']);
+
+        $updated = DB::transaction(function () use ($order, $data, $customer, $request) {
+            $orderItems = $order->items()->get();
+            $orderItemIds = $orderItems->pluck('id');
+
+            OrderItem::whereIn('id', $orderItemIds)->delete();
+
+            $order->update([
+                'party_id' => $customer->id,
+                'party_type' => Customer::class,
+                'transaction_date' => $data['date'],
+                'notes' => $data['notes'] ?? null,
+                'total_amount' => 0,
+                'updated_by' => $request->user()->id,
+            ]);
+
+            $total = 0;
+
+            foreach ($data['items'] as $item) {
+                $product = Product::findOrFail($item['product_id']);
+                $totalPrice = $item['quantity'] * $item['unit_price'];
+
+                OrderItem::create([
+                    'order_id' => $order->id,
+                    'product_id' => $product->id,
+                    'batch_no' => $item['batch_no'] ?? null,
+                    'exp_date' => $item['expiry_date'] ?? null,
+                    'quantity' => $item['quantity'],
+                    'bonus' => $item['bonus'] ?? 0,
+                    'discount' => $item['discount'] ?? 0,
+                    'discount_percent' => $item['discount_percent'] ?? 0,
+                    'tax' => $item['tax'] ?? 0,
+                    'tax_percent' => $item['tax_percent'] ?? 0,
+                    'unit_price' => $item['unit_price'],
+                    'total_price' => $totalPrice,
+                    'created_at' => now(),
+                    'created_by' => $request->user()->id,
+                    'updated_by' => $request->user()->id,
+                ]);
+
+                $total += $totalPrice;
+            }
+
+            $totals = $this->calculateTotals($data['items'], (float) ($data['paid_amount'] ?? 0));
+            $order->update(array_merge($totals, ['updated_by' => $request->user()->id]));
+
+            return $order;
+        });
+
+        return response()->json($updated->load('items'));
+    }
+
+    public function deleteQuotation(Request $request, Order $order)
+    {
+        if ($order->transaction_type !== 'quotation') {
+            return response()->json(['message' => 'Invalid order type'], 422);
+        }
+
+        DB::transaction(function () use ($order) {
+            $orderItems = $order->items()->get();
+            $orderItemIds = $orderItems->pluck('id');
+
+            OrderItem::whereIn('id', $orderItemIds)->delete();
+            $order->delete();
+        });
+
+        return response()->json(['message' => 'Deleted']);
+    }
+
     public function updateReturnIn(Request $request, Order $order)
     {
         if ($order->transaction_type !== 'return_in') {
@@ -964,6 +1252,7 @@ class TransactionController extends Controller
             'purchase' => 'trx_P',
             'return_in' => 'trx_R',
             'return_out' => 'trx_O',
+            'quotation' => 'trx_Q',
             default => throw new \InvalidArgumentException('Unsupported transaction type.'),
         };
 

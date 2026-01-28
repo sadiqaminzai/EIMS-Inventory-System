@@ -8,7 +8,7 @@ import { DenseTable } from '../components/ui/DenseTable';
 import { ActionButtons } from '../components/ui/ActionButtons';
 import { Button } from '../components/ui/button';
 import { Save, X } from 'lucide-react';
-import { format } from 'date-fns';
+import { formatDateTime } from '../utils/dateTime';
 
 const BrandForm = ({ initialData, onSave, onCancel }: { initialData?: Brand, onSave: (data: any) => void, onCancel: () => void }) => {
   const { register, handleSubmit, formState: { errors } } = useForm({ defaultValues: initialData || { status: 'active' } });
@@ -73,7 +73,7 @@ export const BrandsPage = () => {
       header: 'Created At', 
       accessorKey: 'created_at' as keyof Brand, 
       sortable: true,
-      cell: (i: Brand) => i.created_at ? format(new Date(i.created_at), 'yyyy-MM-dd HH:mm') : '-'
+      cell: (i: Brand) => formatDateTime(i.created_at)
     },
     { 
       header: 'Status', 
@@ -146,7 +146,7 @@ export const BrandsPage = () => {
                     </div>
                     <div>
                          <span className="block font-semibold">Created At</span>
-                         {viewBrand.created_at ? format(new Date(viewBrand.created_at), 'yyyy-MM-dd HH:mm') : '-'}
+                         {formatDateTime(viewBrand.created_at)}
                     </div>
                      <div>
                         <span className="block font-semibold">Updated By</span>
@@ -154,7 +154,7 @@ export const BrandsPage = () => {
                     </div>
                     <div>
                          <span className="block font-semibold">Updated At</span>
-                         {viewBrand.updated_at ? format(new Date(viewBrand.updated_at), 'yyyy-MM-dd HH:mm') : '-'}
+                         {formatDateTime(viewBrand.updated_at)}
                     </div>
                 </div>
 

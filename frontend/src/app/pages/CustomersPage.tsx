@@ -8,15 +8,15 @@ import { DenseTable } from '../components/ui/DenseTable';
 import { ActionButtons } from '../components/ui/ActionButtons';
 import { Button } from '../components/ui/button';
 import { Save, X } from 'lucide-react';
-import { format } from 'date-fns';
+import { formatDateTime } from '../utils/dateTime';
 
 const CustomerForm = ({ initialData, onSave, onCancel }: { initialData?: Customer, onSave: (data: any) => void, onCancel: () => void }) => {
   const { register, handleSubmit, formState: { errors } } = useForm({ defaultValues: initialData || { status: 'active' } });
   return (
     <form onSubmit={handleSubmit(onSave)} className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <DenseInput label="Name" {...register('name', { required: 'Required' })} error={errors.name?.message as string} required />
-      <DenseInput label="Phone" {...register('phone', { required: 'Required' })} error={errors.phone?.message as string} required />
-      <DenseInput label="Email" type="email" {...register('email', { required: 'Required' })} error={errors.email?.message as string} required />
+      <DenseInput label="Phone" {...register('phone')} error={errors.phone?.message as string} />
+      <DenseInput label="Email" type="email" {...register('email')} error={errors.email?.message as string} />
       <DenseSelect label="Status" options={[{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }]} {...register('status')} />
       <div className="col-span-1 md:col-span-2">
         <DenseInput label="Address" {...register('address')} />
@@ -61,7 +61,7 @@ export const CustomersPage = () => {
       header: 'Created At', 
       accessorKey: 'created_at' as keyof Customer, 
       sortable: true,
-      cell: (i: Customer) => i.created_at ? format(new Date(i.created_at), 'yyyy-MM-dd HH:mm') : '-'
+      cell: (i: Customer) => formatDateTime(i.created_at)
     },
     { 
       header: 'Status', 
@@ -138,7 +138,7 @@ export const CustomersPage = () => {
                     </div>
                     <div>
                          <span className="block font-semibold">Created At</span>
-                         {viewCustomer.created_at ? format(new Date(viewCustomer.created_at), 'yyyy-MM-dd HH:mm') : '-'}
+                         {formatDateTime(viewCustomer.created_at)}
                     </div>
                      <div>
                         <span className="block font-semibold">Updated By</span>
@@ -146,7 +146,7 @@ export const CustomersPage = () => {
                     </div>
                     <div>
                          <span className="block font-semibold">Updated At</span>
-                         {viewCustomer.updated_at ? format(new Date(viewCustomer.updated_at), 'yyyy-MM-dd HH:mm') : '-'}
+                         {formatDateTime(viewCustomer.updated_at)}
                     </div>
                 </div>
 

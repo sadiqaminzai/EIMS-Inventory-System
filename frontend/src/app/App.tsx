@@ -61,7 +61,7 @@ const AppRoutes = () => {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/EIMS">
       <Toaster position="top-right" richColors />
       <AppRoutes />
     </BrowserRouter>

@@ -11,6 +11,7 @@ import { ActionButtons } from '../components/ui/ActionButtons';
 import { Button } from '../components/ui/button';
 import { Trash2, Plus, Printer, Save, X, Check } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+import { formatDateTime } from '../utils/dateTime';
 import { InvoiceTemplate } from '../components/print/InvoiceTemplate';
 import { PrintHandler } from '../components/print/PrintHandler';
 import { Tooltip, TooltipTrigger, TooltipContent } from '../components/ui/tooltip';
@@ -18,21 +19,24 @@ import { generateInvoicePDF } from '../utils/pdfGenerator';
 
 const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSave: (data: any) => void, onCancel: () => void }) => {
   const { customers, suppliers, products, currentUser, sales, purchases, returns, printSettings, hasPermission } = useStore();
-  const resolveType = (s: Sale) => (s.invoice_type || 'sale') as 'sale' | 'purchase' | 'return_in' | 'return_out';
-  const getNextId = (type: 'sale' | 'purchase' | 'return_in' | 'return_out') => {
+  const resolveType = (s: Sale) => (s.invoice_type || 'sale') as 'sale' | 'purchase' | 'return_in' | 'return_out' | 'quotation';
+  const getNextId = (type: 'sale' | 'purchase' | 'return_in' | 'return_out' | 'quotation') => {
     const filtered = sales.filter(s => resolveType(s) === type);
     const max = filtered.length > 0 ? Math.max(...filtered.map(s => parseInt(s.invoice_no) || 0)) : 0;
     return max + 1;
   };
 
-  const { register, control, handleSubmit, setValue, watch, trigger, formState: { errors }, setFocus } = useForm({
+  const emptyItem = { product_id: '', batch_no: '', quantity: 1, bonus: 0, sale_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, exp_date: '' };
+
+  const { register, control, handleSubmit, setValue, watch, trigger, formState: { errors }, setFocus, getValues } = useForm({
+    shouldUnregister: true,
     defaultValues: initialData || {
       invoice_type: 'sale',
       customer_id: '',
       supplier_id: '',
       sale_date: format(new Date(), 'yyyy-MM-dd'),
       invoice_no: getNextId('sale').toString(),
-      items: [{ product_id: '', batch_no: '', quantity: 1, bonus: 0, sale_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, exp_date: '' }],
+      items: [emptyItem],
       sub_total: 0,
       total_discount: 0,
       total_tax: 0,
@@ -51,9 +55,19 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
     return Number.isNaN(parsed.getTime()) ? '' : format(parsed, 'yyyy-MM-dd');
   };
 
-  const { fields, append, remove } = useFieldArray({ control, name: 'items' });
+  const { fields, append, remove, replace } = useFieldArray({ control, name: 'items' });
   const items = useWatch({ control, name: 'items' }) || [];
-  const invoiceType = (watch('invoice_type') || 'sale') as 'sale' | 'purchase' | 'return_in' | 'return_out';
+    const handleRemoveItem = (index: number) => {
+      const current = getValues('items') || [];
+      const next = current.filter((_: any, i: number) => i !== index);
+      if (next.length === 0) {
+        replace([emptyItem]);
+      } else {
+        replace(next);
+      }
+      trigger();
+    };
+  const invoiceType = (watch('invoice_type') || 'sale') as 'sale' | 'purchase' | 'return_in' | 'return_out' | 'quotation';
   const [batchCache, setBatchCache] = useState<Record<number, InventoryBatch[]>>({});
 
   useEffect(() => {
@@ -335,14 +349,21 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
   const priceLabel = invoiceType === 'purchase' || invoiceType === 'return_out' ? 'Cost' : 'Price';
   const partyLabel = invoiceType === 'purchase' || invoiceType === 'return_out' ? 'Supplier' : 'Customer';
   const partyOptions = invoiceType === 'purchase' || invoiceType === 'return_out'
-    ? suppliers.map(s => ({ value: s.id, label: s.name }))
-    : customers.map(c => ({ value: c.id, label: c.name }));
+    ? suppliers
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(s => ({ value: s.id, label: s.name }))
+    : customers
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(c => ({ value: c.id, label: c.name }));
 
   const invoiceTypeOptions = [
-    { label: 'Sales', value: 'sale', perm: 'sales.create' },
-    { label: 'Sales Return', value: 'return_in', perm: 'return_in.create' },
-    { label: 'Purchase', value: 'purchase', perm: 'purchase.create' },
-    { label: 'Purchase Return', value: 'return_out', perm: 'return_out.create' }
+    { label: 'Sales', value: 'sale', perm: 'sales.create', title: 'Sales Invoice' },
+    { label: 'S. Return', value: 'return_in', perm: 'return_in.create', title: 'Sales Return' },
+    { label: 'Purchase', value: 'purchase', perm: 'purchase.create', title: 'Purchase Invoice' },
+    { label: 'P. Return', value: 'return_out', perm: 'return_out.create', title: 'Purchase Return' },
+    { label: 'Quotation', value: 'quotation', perm: 'sales.create', title: 'Quotation Invoice' },
   ].filter(opt => hasPermission(opt.perm as any));
 
   return (
@@ -361,36 +382,46 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
               onChange={field.onChange}
               className="bg-white"
               error={(invoiceType === 'purchase' || invoiceType === 'return_out' ? errors.supplier_id : errors.customer_id)?.message as string}
+              width="340px"
             />
           )}
         />
         <div className="flex flex-col gap-1">
           <span className="text-[10px] font-semibold uppercase text-gray-500">Type</span>
-          <div className="flex items-center gap-3 text-xs whitespace-nowrap">
-            {invoiceTypeOptions.map((opt) => (
-              <label key={opt.value} className="flex items-center gap-1 text-gray-600">
-                <input
-                  type="radio"
-                  value={opt.value}
-                  {...register('invoice_type')}
-                  className="h-2.5 w-2.5 text-blue-600"
-                />
-                {opt.label}
-              </label>
-            ))}
+          <div className="flex flex-row flex-wrap gap-2 items-center text-[11px] whitespace-nowrap">
+            <div className="flex flex-row flex-nowrap gap-2 w-full">
+              {invoiceTypeOptions.map((opt) => (
+                <label
+                  key={opt.value}
+                  title={opt.title}
+                  className="flex items-center gap-1 px-3 py-1 rounded-full border border-gray-300 bg-white hover:bg-blue-50 hover:border-blue-400 transition text-[11px] whitespace-nowrap mb-0"
+                  style={{ marginBottom: 0, flex: '0 0 auto' }}
+                >
+                  <input
+                    type="radio"
+                    value={opt.value}
+                    {...register('invoice_type')}
+                    className="h-3 w-3 text-blue-600 accent-blue-600 mr-1"
+                  />
+                  <span>{opt.label}</span>
+                </label>
+              ))}
+            </div>
           </div>
         </div>
         <div className="md:col-span-2 flex flex-col md:flex-row md:items-end md:justify-end gap-4">
-          <Button 
-            type="button" 
-            variant="ghost" 
-            onClick={addNewItem} 
-            className="text-xs text-blue-600 font-semibold hover:text-blue-800 hover:bg-blue-50 h-8 px-3"
+          <Button
+            type="button"
+            variant="outline"
+            onClick={addNewItem}
+            className="flex items-center gap-1 px-2 py-1 rounded-full border border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-400 h-8 text-xs font-semibold shadow-none"
+            style={{ minWidth: 0 }}
           >
-            <Plus className="h-3 w-3 mr-1" /> Add Item
+            <span className="flex items-center justify-center rounded-full bg-blue-100 text-blue-600 w-6 h-6 mr-1 p-0.5"><Plus className="h-4 w-4" /></span>
+            Item
           </Button>
-          <DenseInput label="Invoice No" {...register('invoice_no')} readOnly className="bg-gray-100 w-[130px]" />
-          <DenseInput label="Invoice Date" type="date" {...register('sale_date', { required: 'Required' })} className="bg-white w-[160px]" />
+          <DenseInput label="Invoice No" {...register('invoice_no')} readOnly className="bg-gray-100 w-[80px]" />
+          <DenseInput label="Invoice Date" type="date" {...register('sale_date', { required: 'Required' })} className="bg-white w-[120px]" />
         </div>
       </div>
 
@@ -423,26 +454,36 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                     rules={{ required: true }}
                     render={({ field }) => (
                       <SearchableSelect
-                        options={products.map(p => {
-                          const useFifo = invoiceType === 'sale';
-                          const fifoQty = getFifoRemainingStock(p.id);
-                          const totalQty = getTotalStock(p.id);
-                          const displayQty = useFifo ? fifoQty : totalQty;
-                          return {
-                            value: p.id,
-                            label: `${p.name} (Qty: ${displayQty})`,
-                            disabled: (invoiceType === 'sale' || invoiceType === 'return_out')
-                              ? fifoQty <= 0
-                              : false
-                          };
-                        })}
+                        options={products
+                          .slice()
+                          .sort((a, b) => a.name.localeCompare(b.name))
+                          .map(p => {
+                            if (invoiceType === 'quotation') {
+                              return {
+                                value: p.id,
+                                label: p.name,
+                                disabled: false
+                              };
+                            }
+                            const useFifo = invoiceType === 'sale';
+                            const fifoQty = getFifoRemainingStock(p.id);
+                            const totalQty = getTotalStock(p.id);
+                            const displayQty = useFifo ? fifoQty : totalQty;
+                            return {
+                              value: p.id,
+                              label: `${p.name} (Qty: ${displayQty})`,
+                              disabled: (invoiceType === 'sale' || invoiceType === 'return_out')
+                                ? fifoQty <= 0
+                                : false
+                            };
+                          })}
                         value={field.value}
                         onChange={(val) => {
                             field.onChange(val);
                             handleProductChange(index, val);
                         }}
                         placeholder="Select Product"
-                        width="300px"
+                        width="380px"
                         triggerId={`sales-item-product-${index}`}
                       />
                     )}
@@ -474,99 +515,85 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                       min: 1,
                       onChange: () => trigger(),
                       validate: (value) => {
+                        if (!value || value <= 0) return 'Required';
+                        if (invoiceType === 'quotation') return true;
+                        // --- original validation logic for other types ---
                         if (invoiceType === 'purchase' || invoiceType === 'return_in') return true;
                         const item = items[index];
                         if (!item.product_id) return true;
-                            
-                            const batches = getBatchStock(item.product_id);
-                            const currentBatchNo = item.batch_no || 'N/A';
-                            
-                            const batch = batches.find(b => b.batch_no === currentBatchNo);
-                            
-                            // Calculate required total including bonus
-                            // Note: 'value' here is quantity. Item might have old quantity in it, so we use 'value' as current input.
-                            // But we also need current bonus.
-                            const currentBonus = item.bonus || 0;
-                            const totalReq = (value || 0) + currentBonus;
-
-                            if (!batch) {
-                                // If we can't find the batch info, but we have the product, check total stock?
-                                const prod = products.find(p => p.id === item.product_id);
-                                if (prod && totalReq > prod.stock_qty) return `Max ${prod.stock_qty} (incl bonus)`;
-                                return true; 
-                            }
-
-                            // Check usage in other rows
-                            let usedInOtherRows = 0;
-                            items.forEach((i, idx) => {
-                                if (idx !== index && i.product_id === item.product_id) {
-                                    const b = i.batch_no || 'N/A';
-                                    if (b === currentBatchNo) {
-                                        usedInOtherRows += (i.quantity || 0) + (i.bonus || 0);
-                                    }
-                                }
-                            });
-                            
-                            const available = batch.qty - usedInOtherRows;
-                            if (totalReq > available) return `Max ${available} (Total)`;
-                            
-                            return true;
+                        const batches = getBatchStock(item.product_id);
+                        const currentBatchNo = item.batch_no || 'N/A';
+                        const batch = batches.find(b => b.batch_no === currentBatchNo);
+                        const currentBonus = item.bonus || 0;
+                        const totalReq = (value || 0) + currentBonus;
+                        if (!batch) {
+                          const prod = products.find(p => p.id === item.product_id);
+                          if (prod && totalReq > prod.stock_qty) return `Max ${prod.stock_qty} (incl bonus)`;
+                          return true; 
                         }
+                        let usedInOtherRows = 0;
+                        items.forEach((i, idx) => {
+                          if (idx !== index && i.product_id === item.product_id) {
+                            const b = i.batch_no || 'N/A';
+                            if (b === currentBatchNo) {
+                              usedInOtherRows += (i.quantity || 0) + (i.bonus || 0);
+                            }
+                          }
+                        });
+                        const available = batch.qty - usedInOtherRows;
+                        if (totalReq > available) return `Max ${available} (Total)`;
+                        return true;
+                      }
                     })} 
                   />
                   {errors.items?.[index]?.quantity && (
-                      <div className="absolute top-full left-0 z-50 bg-red-100 text-red-600 text-[10px] px-1 py-0.5 rounded shadow border border-red-200 mt-0.5 whitespace-nowrap">
-                          {errors.items[index].quantity.message}
-                      </div>
+                    <div className="absolute top-full left-0 z-50 bg-red-100 text-red-600 text-[10px] px-1 py-0.5 rounded shadow border border-red-200 mt-0.5 whitespace-nowrap">
+                      {errors.items[index].quantity.message}
+                    </div>
                   )}
                 </td>
                 <td className="px-3 py-2 relative">
-                   <input 
+                     <input 
                       type="number" 
                       className={`w-full h-7 px-2 border rounded text-xs focus:ring-1 outline-none ${errors.items?.[index]?.bonus ? 'border-red-500 focus:ring-red-500 bg-red-50' : 'border-gray-300 focus:ring-blue-500'}`}
-                        {...register(`items.${index}.bonus`, { 
-                          valueAsNumber: true,
-                          onChange: () => trigger(),
-                          validate: (value) => {
-                            if (invoiceType === 'purchase' || invoiceType === 'return_in') return true;
-                            const item = items[index];
-                            if (!item.product_id) return true;
-                              
-                              const batches = getBatchStock(item.product_id);
-                              const currentBatchNo = item.batch_no || 'N/A';
-                              const batch = batches.find(b => b.batch_no === currentBatchNo);
-                              
-                              const currentQty = item.quantity || 0;
-                              const totalReq = currentQty + (value || 0);
-
-                              if (!batch) {
-                                  const prod = products.find(p => p.id === item.product_id);
-                                  if (prod && totalReq > prod.stock_qty) return `Max ${prod.stock_qty}`;
-                                  return true; 
-                              }
-
-                              let usedInOtherRows = 0;
-                              items.forEach((i, idx) => {
-                                  if (idx !== index && i.product_id === item.product_id) {
-                                      const b = i.batch_no || 'N/A';
-                                      if (b === currentBatchNo) {
-                                          usedInOtherRows += (i.quantity || 0) + (i.bonus || 0);
-                                      }
-                                  }
-                              });
-                              
-                              const available = batch.qty - usedInOtherRows;
-                              if (totalReq > available) return `Max ${available}`;
-                              
-                              return true;
+                      {...register(`items.${index}.bonus`, { 
+                        valueAsNumber: true,
+                        onChange: () => trigger(),
+                        validate: (value) => {
+                        if (invoiceType === 'quotation') return true;
+                        if (invoiceType === 'purchase' || invoiceType === 'return_in') return true;
+                        const item = items[index];
+                        if (!item.product_id) return true;
+                          const batches = getBatchStock(item.product_id);
+                          const currentBatchNo = item.batch_no || 'N/A';
+                          const batch = batches.find(b => b.batch_no === currentBatchNo);
+                          const currentQty = item.quantity || 0;
+                          const totalReq = currentQty + (value || 0);
+                          if (!batch) {
+                            const prod = products.find(p => p.id === item.product_id);
+                            if (prod && totalReq > prod.stock_qty) return `Max ${prod.stock_qty}`;
+                            return true; 
                           }
+                          let usedInOtherRows = 0;
+                          items.forEach((i, idx) => {
+                            if (idx !== index && i.product_id === item.product_id) {
+                              const b = i.batch_no || 'N/A';
+                              if (b === currentBatchNo) {
+                                usedInOtherRows += (i.quantity || 0) + (i.bonus || 0);
+                              }
+                            }
+                          });
+                          const available = batch.qty - usedInOtherRows;
+                          if (totalReq > available) return `Max ${available}`;
+                          return true;
+                        }
                       })} 
-                   />
-                   {errors.items?.[index]?.bonus && (
+                     />
+                     {invoiceType !== 'quotation' && errors.items?.[index]?.bonus && (
                       <div className="absolute top-full left-0 z-50 bg-red-100 text-red-600 text-[10px] px-1 py-0.5 rounded shadow border border-red-200 mt-0.5 whitespace-nowrap">
-                          {errors.items[index].bonus.message}
+                        {errors.items[index].bonus.message}
                       </div>
-                   )}
+                     )}
                 </td>
                 <td className="px-3 py-2"><input type="number" step="0.01" className="w-full h-7 px-2 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.sale_price`, { valueAsNumber: true, onChange: () => trigger() })} /></td>
                 <td className="px-3 py-2"><input type="number" step="0.01" className="w-full h-7 px-2 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.discount_percent`, { valueAsNumber: true, onChange: () => trigger() })} /></td>
@@ -579,7 +606,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                         type="button"
                         variant="ghost"
                         size="icon"
-                        onClick={() => remove(index)}
+                        onClick={() => handleRemoveItem(index)}
                         className="h-6 w-6 text-red-500 hover:bg-red-50 hover:text-red-600"
                     >
                         <Trash2 className="h-3 w-3" />
@@ -663,7 +690,7 @@ export const SalesPage = () => {
   const [editingSale, setEditingSale] = useState<Sale | undefined>(undefined);
   const [viewSale, setViewSale] = useState<Sale | null>(null);
   const [printData, setPrintData] = useState<Sale | null>(null);
-  const [typeFilter, setTypeFilter] = useState<'all' | 'sale' | 'return_in' | 'purchase' | 'return_out'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'sale' | 'return_in' | 'purchase' | 'return_out' | 'quotation'>('all');
   const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
 
   const handleSave = (data: any) => {
@@ -710,7 +737,9 @@ export const SalesPage = () => {
         ? 'ReturnOut'
         : invoiceType === 'return_in'
           ? 'ReturnIn'
-          : 'Sale';
+          : invoiceType === 'quotation'
+            ? 'Quotation'
+            : 'Sale';
 
     await generateInvoicePDF(pdfType, sale, tenant, products, party, printSettings);
   };
@@ -727,10 +756,11 @@ export const SalesPage = () => {
     };
   });
 
-  const typeLabel = (type: 'sale' | 'purchase' | 'return_in' | 'return_out') =>
+  const typeLabel = (type: 'sale' | 'purchase' | 'return_in' | 'return_out' | 'quotation') =>
     type === 'sale' ? 'Sales' :
     type === 'purchase' ? 'Purchase' :
-    type === 'return_in' ? 'Sales Return' : 'Purchase Return';
+    type === 'return_in' ? 'S. Return' :
+    type === 'return_out' ? 'P. Return' : 'Quotation';
 
   const permPrefixForInvoice = (sale: Sale) => {
     const invoiceType = resolveInvoiceType(sale);
@@ -818,9 +848,10 @@ export const SalesPage = () => {
               options={[
                 { value: 'all', label: 'All' },
                 ...(hasPermission('sales.view') ? [{ value: 'sale', label: 'Sales' }] : []),
-                ...(hasPermission('return_in.view') ? [{ value: 'return_in', label: 'Sales Return' }] : []),
+                ...(hasPermission('return_in.view') ? [{ value: 'return_in', label: 'S. Return' }] : []),
                 ...(hasPermission('purchase.view') ? [{ value: 'purchase', label: 'Purchase' }] : []),
-                ...(hasPermission('return_out.view') ? [{ value: 'return_out', label: 'Purchase Return' }] : [])
+                ...(hasPermission('return_out.view') ? [{ value: 'return_out', label: 'P. Return' }] : []),
+                ...(hasPermission('sales.view') ? [{ value: 'quotation', label: 'Quotation' }] : [])
               ]}
               className="w-40"
             />
@@ -862,7 +893,7 @@ export const SalesPage = () => {
                       </div>
                       <div>
                         <span className="block font-semibold">Created At</span>
-                        {viewSale.created_at ? format(new Date(viewSale.created_at), 'yyyy-MM-dd HH:mm') : '-'}
+                        {formatDateTime(viewSale.created_at)}
                       </div>
                       <div>
                         <span className="block font-semibold">Updated By</span>
@@ -870,7 +901,7 @@ export const SalesPage = () => {
                       </div>
                       <div>
                         <span className="block font-semibold">Updated At</span>
-                        {viewSale.updated_at ? format(new Date(viewSale.updated_at), 'yyyy-MM-dd HH:mm') : '-'}
+                        {formatDateTime(viewSale.updated_at)}
                       </div>
                     </div>
                     <div className="flex justify-end gap-2">

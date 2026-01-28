@@ -20,9 +20,9 @@ class SupplierController extends Controller
     {
         $data = $request->validate([
             'name' => ['required', 'string'],
-            'email' => ['required', 'email', Rule::unique('suppliers', 'email')->where('tenant_id', TenantContext::getTenantId())],
-            'phone' => ['required', 'string'],
-            'address' => ['required', 'string'],
+            'email' => ['nullable', 'email', Rule::unique('suppliers', 'email')->where('tenant_id', TenantContext::getTenantId())],
+            'phone' => ['nullable', 'string'],
+            'address' => ['nullable', 'string'],
             'tax_id' => ['nullable', 'string'],
             'status' => ['nullable', 'string'],
         ]);
@@ -42,9 +42,9 @@ class SupplierController extends Controller
     {
         $data = $request->validate([
             'name' => ['required', 'string'],
-            'email' => ['required', 'email', Rule::unique('suppliers', 'email')->where('tenant_id', TenantContext::getTenantId())->ignore($supplier->id)],
-            'phone' => ['required', 'string'],
-            'address' => ['required', 'string'],
+            'email' => ['nullable', 'email', Rule::unique('suppliers', 'email')->where('tenant_id', TenantContext::getTenantId())->ignore($supplier->id)],
+            'phone' => ['nullable', 'string'],
+            'address' => ['nullable', 'string'],
             'tax_id' => ['nullable', 'string'],
             'status' => ['nullable', 'string'],
         ]);

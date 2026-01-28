@@ -9,7 +9,7 @@ import { ActionButtons } from '../components/ui/ActionButtons';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import { FileText, X, Save } from 'lucide-react';
 import { Button } from '../components/ui/button';
-import { format } from 'date-fns';
+import { formatDateTime } from '../utils/dateTime';
 import { toast } from 'sonner';
 import { generateProductInventoryPDF } from '../utils/pdfGenerator';
 
@@ -35,23 +35,24 @@ const ProductForm = ({ initialData, onSave, onCancel }: { initialData?: Product,
     <form onSubmit={handleSubmit((data) => onSave({ ...data, photo_file: selectedFile }))} className="flex flex-col h-full">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <DenseInput label="Product Name" {...register('name', { required: 'Required' })} error={errors.name?.message as string} />
-        <DenseInput label="Model No" {...register('model_no', { required: 'Required' })} error={errors.model_no?.message as string} />
+        <DenseInput label="Model No" {...register('model_no')} error={errors.model_no?.message as string} />
+        
+        <DenseInput type="number" label="Cost Price" {...register('cost_price', { required: 'Required', min: 0 })} error={errors.cost_price?.message as string} />
+        <DenseInput type="number" label="Sale Price" {...register('sale_price', { required: 'Required', min: 0 })} error={errors.sale_price?.message as string} />
         
         <DenseSelect 
           label="Brand" 
           options={brands.map(b => ({ value: b.id, label: b.name }))}
-          {...register('brand_id', { required: 'Required' })} 
+          {...register('brand_id')} 
           error={errors.brand_id?.message as string}
         />
         <DenseSelect 
           label="Country" 
           options={countries.map(c => ({ value: c.id, label: c.name }))}
-          {...register('country_id', { required: 'Required' })} 
+          {...register('country_id')} 
           error={errors.country_id?.message as string}
         />
 
-        <DenseInput type="number" label="Cost Price" {...register('cost_price', { required: 'Required', min: 0 })} error={errors.cost_price?.message as string} />
-        <DenseInput type="number" label="Sale Price" {...register('sale_price', { required: 'Required', min: 0 })} error={errors.sale_price?.message as string} />
         <DenseInput label="Unit of Measure" {...register('unit_of_measure')} error={errors.unit_of_measure?.message as string} />
         <DenseSelect 
           label="Status" 
@@ -289,7 +290,7 @@ export const ProductsPage = () => {
       header: 'Created At', 
       accessorKey: 'created_at' as keyof Product, 
       sortable: true,
-      cell: (i: Product) => i.created_at ? format(new Date(i.created_at), 'yyyy-MM-dd HH:mm') : '-'
+      cell: (i: Product) => formatDateTime(i.created_at)
     },
     // Removed Cost Price column as requested
     { 
@@ -485,7 +486,7 @@ export const ProductsPage = () => {
                     </div>
                     <div>
                          <span className="block font-semibold">Created At</span>
-                         {viewProduct.created_at ? format(new Date(viewProduct.created_at), 'yyyy-MM-dd HH:mm') : '-'}
+                         {formatDateTime(viewProduct.created_at)}
                     </div>
                      <div>
                         <span className="block font-semibold">Updated By</span>
@@ -493,7 +494,7 @@ export const ProductsPage = () => {
                     </div>
                     <div>
                          <span className="block font-semibold">Updated At</span>
-                         {viewProduct.updated_at ? format(new Date(viewProduct.updated_at), 'yyyy-MM-dd HH:mm') : '-'}
+                         {formatDateTime(viewProduct.updated_at)}
                     </div>
                 </div>
 

@@ -20,10 +20,10 @@ class CustomerController extends Controller
     {
         $data = $request->validate([
             'name' => ['required', 'string'],
-            'email' => ['required', 'email', Rule::unique('customers', 'email')->where('tenant_id', TenantContext::getTenantId())],
-            'phone' => ['required', 'string'],
-            'billing_address' => ['required', 'string'],
-            'shipping_address' => ['required', 'string'],
+            'email' => ['nullable', 'email', Rule::unique('customers', 'email')->where('tenant_id', TenantContext::getTenantId())],
+            'phone' => ['nullable', 'string'],
+            'billing_address' => ['nullable', 'string'],
+            'shipping_address' => ['nullable', 'string'],
             'status' => ['nullable', 'string'],
         ]);
 
@@ -42,10 +42,10 @@ class CustomerController extends Controller
     {
         $data = $request->validate([
             'name' => ['required', 'string'],
-            'email' => ['required', 'email', Rule::unique('customers', 'email')->where('tenant_id', TenantContext::getTenantId())->ignore($customer->id)],
-            'phone' => ['required', 'string'],
-            'billing_address' => ['required', 'string'],
-            'shipping_address' => ['required', 'string'],
+            'email' => ['nullable', 'email', Rule::unique('customers', 'email')->where('tenant_id', TenantContext::getTenantId())->ignore($customer->id)],
+            'phone' => ['nullable', 'string'],
+            'billing_address' => ['nullable', 'string'],
+            'shipping_address' => ['nullable', 'string'],
             'status' => ['nullable', 'string'],
         ]);
 

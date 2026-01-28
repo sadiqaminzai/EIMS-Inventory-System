@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('orders', function (Blueprint $table) {
             $table->id();
             $table->foreignId('tenant_id')->constrained('tenants')->cascadeOnDelete();
-            $table->enum('transaction_type', ['purchase', 'sale', 'return_in', 'return_out']);
+            $table->enum('transaction_type', ['purchase', 'sale', 'return_in', 'return_out', 'quotation']);
             $table->string('serial_no')->unique();
             $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
             $table->string('party_type')->nullable();

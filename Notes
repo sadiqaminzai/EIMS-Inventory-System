@@ -1,7 +1,13 @@
-Users added:
+Interface Login Credential added:
 -----------
-superadmin@example.com / password -> superadmin
-admin@example.com / password ->admin1
-accountant@example.com / password
+superadmin@softcareitsolutions.com / password -> aminzaish1
 
-Thank you...!
+-----------------------------------------------
+
+database: u814835276_eims
+username: u814835276_eims
+password: aU:/l6~=X11=
+
+
+ssh -p 65002 u814835276@213.130.145.253
+Sh1@

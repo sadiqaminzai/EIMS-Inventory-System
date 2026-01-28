@@ -42,7 +42,16 @@ class ProductController extends Controller
 
     public function show(Product $product)
     {
-        return response()->json($this->transformProduct($product));
+        $productWithStock = Product::query()
+            ->select('products.*', DB::raw('COALESCE(view_product_stock.current_stock, 0) as current_stock'))
+            ->leftJoin('view_product_stock', function ($join) {
+                $join->on('view_product_stock.product_id', '=', 'products.id')
+                    ->on('view_product_stock.tenant_id', '=', 'products.tenant_id');
+            })
+            ->where('products.id', $product->id)
+            ->firstOrFail();
+
+        return response()->json($this->transformProduct($productWithStock));
     }
 
     public function store(Request $request)

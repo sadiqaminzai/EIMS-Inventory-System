@@ -14,7 +14,7 @@ export interface OrderItem {
 }
 
 export interface CreateOrderRequest {
-  type: 'purchase' | 'sale' | 'return_in' | 'return_out';
+  type: 'purchase' | 'sale' | 'return_in' | 'return_out' | 'quotation';
   party_id: number; // Supplier ID or Customer ID
   items: OrderItem[];
   date: string;
@@ -44,6 +44,10 @@ export const transactionApi = {
     return await apiClient.post('/transactions/return-out', data);
   },
 
+  createQuotation: async (data: CreateOrderRequest) => {
+    return await apiClient.post('/transactions/quotation', data);
+  },
+
   updatePurchase: async (id: string, data: CreateOrderRequest) => {
     return await apiClient.put(`/transactions/purchase/${id}`, data);
   },
@@ -60,6 +64,10 @@ export const transactionApi = {
     return await apiClient.put(`/transactions/return-out/${id}`, data);
   },
 
+  updateQuotation: async (id: string, data: CreateOrderRequest) => {
+    return await apiClient.put(`/transactions/quotation/${id}`, data);
+  },
+
   deletePurchase: async (id: string) => {
     return await apiClient.delete(`/transactions/purchase/${id}`);
   },
@@ -74,6 +82,10 @@ export const transactionApi = {
 
   deleteReturnOut: async (id: string) => {
     return await apiClient.delete(`/transactions/return-out/${id}`);
+  },
+
+  deleteQuotation: async (id: string) => {
+    return await apiClient.delete(`/transactions/quotation/${id}`);
   },
 
   getHistory: async (params?: { type?: string; page?: number }) => {

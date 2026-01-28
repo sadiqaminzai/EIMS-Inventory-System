@@ -1,17 +1,19 @@
 import { forwardRef } from 'react';
 import { useStore, Sale, Purchase, Return } from '../../../store';
 import { format } from 'date-fns';
+import { formatDateTime } from '../../utils/dateTime';
 
 interface InvoiceTemplateProps {
     data: Sale | Purchase | Return | null;
-    type: 'sale' | 'purchase' | 'return' | 'return_in' | 'return_out';
+    type: 'sale' | 'purchase' | 'return' | 'return_in' | 'return_out' | 'quotation';
     id?: string;
 }
 
 export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(({ data, type, id = 'invoice-template-container' }, ref) => {
-  const { tenant, printSettings, customers, suppliers, products, currentUser } = useStore();
+    const { tenant, printSettings, customers, suppliers, products, currentUser } = useStore();
 
     const isSale = type === 'sale';
+    const isQuotation = type === 'quotation';
     const isPurchase = type === 'purchase';
     const isReturn = type === 'return' || type === 'return_in';
     const isReturnOut = type === 'return_out';
@@ -27,7 +29,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
   // --- Helpers ---
 
   const getParty = () => {
-        if (isSale) return customers.find(c => c.id === (data as Sale).customer_id);
+                if (isSale || isQuotation) return customers.find(c => c.id === (data as Sale).customer_id);
         if (isReturn) return customers.find(c => c.id === (data as Return).customer_id);
         if (isPurchase || isReturnOut) return suppliers.find(s => s.id === (data as Purchase).supplier_id);
     return null;
@@ -36,7 +38,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
   const party = getParty();
 
   const getDate = () => {
-      if (isSale) return (data as Sale).sale_date;
+      if (isSale || isQuotation) return (data as Sale).sale_date;
       if (isPurchase) return (data as any).purchase_date || (data as any).sale_date;
       if (isReturn || isReturnOut) return (data as Return).return_date || (data as any).sale_date;
       return '';
@@ -51,14 +53,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
     }
   };
 
-    const getFormattedDateTime = (dateStr?: string) => {
-        if (!dateStr) return '-';
-        try {
-            return format(new Date(dateStr), 'dd/MM/yyyy h:mm a');
-        } catch (e) {
-            return dateStr;
-        }
-    };
+    const getFormattedDateTime = (dateStr?: string) => formatDateTime(dateStr, 'dd/MM/yyyy h:mm a');
 
   // --- Footer Calculation ---
   const itemsCount = data.items.length;
@@ -227,7 +222,15 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
         {/* Right: Title & Invoice Details */}
         <div className="flex-1 flex flex-col items-end">
             <h2 className="text-xl font-bold text-gray-800 uppercase tracking-widest mb-4">
-                {isPurchase ? 'PURCHASE INVOICE' : isReturnOut ? 'PURCHASE RETURN' : (isSale ? 'SALES INVOICE' : 'SALES RETURN')}
+                {isQuotation
+                  ? 'QUOTATION'
+                  : isPurchase
+                  ? 'PURCHASE INVOICE'
+                  : isReturnOut
+                  ? 'PURCHASE RETURN'
+                  : isSale
+                  ? 'SALES INVOICE'
+                  : 'SALES RETURN'}
             </h2>
 
             {/* Invoice Data - Grid for alignment */}

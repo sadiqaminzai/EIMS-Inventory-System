@@ -14,6 +14,7 @@ import {
   BarChart, Bar, PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { format, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns';
+import { formatDateTime } from '../utils/dateTime';
 import { clsx } from 'clsx';
 import { useState } from 'react';
 import { Modal } from '../components/ui/Modal';
@@ -63,7 +64,7 @@ const RecentActivityTable = ({ transactions }: { transactions: any[] }) => (
                     transactions.map((tx) => (
                         <tr key={tx.id} className="hover:bg-gray-50/50 transition-colors">
                             <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                                {format(parseISO(tx.date), 'MMM dd, HH:mm')}
+                                {formatDateTime(parseISO(tx.date), 'MMM dd, h:mm a')}
                             </td>
                             <td className="px-4 py-3">
                                 <span className={clsx(
@@ -197,20 +198,6 @@ export const Dashboard = () => {
         <div>
             <h1 className="text-2xl font-bold text-gray-900">Dashboard Overview</h1>
             <p className="text-gray-500 text-sm">Welcome back, here's what's happening today.</p>
-        </div>
-        <div className="flex gap-2">
-            <button 
-                onClick={handleDownloadReport}
-                className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 shadow-sm transition-colors"
-            >
-                Download Report
-            </button>
-            <button 
-                onClick={() => setIsTxModalOpen(true)}
-                className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 shadow-sm transition-colors"
-            >
-                Add Transaction
-            </button>
         </div>
       </div>
 

@@ -165,7 +165,7 @@ export interface Sale extends BaseEntity {
   invoice_no: string;
   customer_id: string;
   supplier_id?: string;
-  invoice_type?: 'sale' | 'purchase' | 'return_in' | 'return_out';
+  invoice_type?: 'sale' | 'purchase' | 'return_in' | 'return_out' | 'quotation';
   sale_date: string;
   items: SalesItem[];
   sub_total: number;
@@ -564,6 +564,7 @@ export const useStore = create<AppState>((set, get) => ({
         transactionApi.getHistory({ type: 'sale' }),
         transactionApi.getHistory({ type: 'return_in' }),
         transactionApi.getHistory({ type: 'return_out' }),
+        transactionApi.getHistory({ type: 'quotation' }),
       ];
 
       const baseLabels = [
@@ -581,25 +582,30 @@ export const useStore = create<AppState>((set, get) => ({
         'Sales',
         'Returns (In)',
         'Returns (Out)',
+        'Quotations',
       ];
 
-      // Admin-only requests (users, roles, permissions)
+      const currentPermissions = get().currentUser.permissions ?? [];
+      const canViewUsers = isSuperAdmin || currentPermissions.includes('user.view') || currentPermissions.includes('manage_users');
+
+      const userRequests = canViewUsers ? [userApi.list()] : [];
+      const userLabels = canViewUsers ? ['Users'] : [];
+
+      // Admin-only requests (roles, permissions, clients)
       const adminRequests = isSuperAdmin ? [
-        userApi.list(),
         roleApi.list(),
         permissionApi.list(),
         tenantApi.list(),
       ] : [];
 
       const adminLabels = isSuperAdmin ? [
-        'Users',
         'Roles',
         'Permissions',
         'Clients',
       ] : [];
 
-      const requests = [...baseRequests, ...adminRequests];
-      const labels = [...baseLabels, ...adminLabels];
+      const requests = [...baseRequests, ...userRequests, ...adminRequests];
+      const labels = [...baseLabels, ...userLabels, ...adminLabels];
 
       const results = await Promise.allSettled(requests);
 
@@ -631,18 +637,25 @@ export const useStore = create<AppState>((set, get) => ({
       const sales = unwrap(11, [] as any);
       const returns = unwrap(12, [] as any);
       const returnOuts = unwrap(13, [] as any);
+      const quotations = unwrap(14, [] as any);
 
       // Admin-only data (with offset for base requests)
-      const users = isSuperAdmin ? unwrap(14, [] as any[]) : [];
-      const _roles = isSuperAdmin ? unwrap(15, [] as any[]) : [];
-      const _permissions = isSuperAdmin ? unwrap(16, [] as any[]) : [];
-      const clients = isSuperAdmin ? unwrap(17, [] as any[]) : [];
+      const userIndex = 15;
+      const roleIndex = userIndex + (canViewUsers ? 1 : 0);
+      const permissionIndex = roleIndex + (isSuperAdmin ? 1 : 0);
+      const clientIndex = permissionIndex + (isSuperAdmin ? 1 : 0);
+
+      const users = canViewUsers ? unwrap(userIndex, [] as any[]) : [];
+      const _roles = isSuperAdmin ? unwrap(roleIndex, [] as any[]) : [];
+      const _permissions = isSuperAdmin ? unwrap(permissionIndex, [] as any[]) : [];
+      const clients = isSuperAdmin ? unwrap(clientIndex, [] as any[]) : [];
 
       const productList = Array.isArray(products?.data) ? products.data : (products?.data?.data ?? products?.data ?? products);
       const purchaseOrders = Array.isArray(purchases?.data) ? purchases.data : (purchases?.data?.data ?? purchases?.data ?? purchases);
       const saleOrders = Array.isArray(sales?.data) ? sales.data : (sales?.data?.data ?? sales?.data ?? sales);
       const returnOrders = Array.isArray(returns?.data) ? returns.data : (returns?.data?.data ?? returns?.data ?? returns);
       const returnOutOrders = Array.isArray(returnOuts?.data) ? returnOuts.data : (returnOuts?.data?.data ?? returnOuts?.data ?? returnOuts);
+      const quotationOrders = Array.isArray(quotations?.data) ? quotations.data : (quotations?.data?.data ?? quotations?.data ?? quotations);
 
       const userMap = new Map<string, string>();
       users.forEach((u) => {
@@ -652,9 +665,19 @@ export const useStore = create<AppState>((set, get) => ({
       clients.forEach((t) => {
         tenantMap.set(String(t.id), t.name ?? '');
       });
+      const currentUser = get().currentUser;
       const resolveUser = (id?: number | string | null) => {
         if (!id) return 'System';
-        return userMap.get(String(id)) ?? `User #${id}`;
+        const idStr = String(id).trim();
+        if (!idStr) return 'System';
+        if (currentUser?.id && String(currentUser.id) === idStr) {
+          return currentUser.name ?? 'System';
+        }
+        const fromMap = userMap.get(idStr);
+        if (fromMap) return fromMap;
+        const asNumber = Number(idStr);
+        if (Number.isNaN(asNumber)) return idStr;
+        return `User #${idStr}`;
       };
       const toDateInput = (value?: string) => {
         if (!value) return '';
@@ -973,6 +996,36 @@ export const useStore = create<AppState>((set, get) => ({
             customer_id: '',
             supplier_id: String(o.party_id ?? ''),
             invoice_type: 'return_out' as const,
+            sale_date: toDateInput(o.transaction_date ?? ''),
+            items: (o.items ?? []).map((i: any) => ({
+              product_id: String(i.product_id ?? ''),
+              sale_price: Number(i.unit_price ?? 0),
+              batch_no: String(i.batch_no ?? ''),
+              quantity: Number(i.quantity ?? 0),
+              bonus: Number(i.bonus ?? 0),
+              exp_date: i.exp_date ?? '',
+              discount: Number(i.discount ?? 0),
+              discount_percent: Number(i.discount_percent ?? 0),
+              tax: Number(i.tax ?? 0),
+              tax_percent: Number(i.tax_percent ?? 0),
+              amount: Number(i.total_price ?? 0),
+            })),
+            sub_total: Number(o.total_amount ?? 0),
+            total_discount: Number(o.total_discount ?? 0),
+            total_tax: Number(o.total_tax ?? 0),
+            net_payable: Number(o.net_amount ?? o.total_amount ?? 0),
+            paid_amount: Number(o.paid_amount ?? 0),
+            created_by: resolveUser(o.created_by),
+            updated_by: resolveUser(o.updated_by),
+            created_at: o.created_at,
+            updated_at: o.updated_at,
+          })),
+          ...(quotationOrders || []).map((o: any) => ({
+            id: String(o.id),
+            invoice_no: o.serial_no ?? o.reference_number ?? '',
+            customer_id: String(o.party_id ?? ''),
+            supplier_id: '',
+            invoice_type: 'quotation' as const,
             sale_date: toDateInput(o.transaction_date ?? ''),
             items: (o.items ?? []).map((i: any) => ({
               product_id: String(i.product_id ?? ''),
@@ -1605,10 +1658,11 @@ export const useStore = create<AppState>((set, get) => ({
 
   addPurchase: async (data) => {
     try {
+      const sanitizedItems = data.items.filter((i) => String(i.product_id ?? '').trim());
       await transactionApi.createPurchase({
         type: 'purchase',
         party_id: Number(data.supplier_id),
-        items: data.items.map((i) => ({
+        items: sanitizedItems.map((i) => ({
           product_id: Number(i.product_id),
           quantity: i.quantity,
           bonus: i.bonus ?? 0,
@@ -1633,10 +1687,11 @@ export const useStore = create<AppState>((set, get) => ({
 
   updatePurchase: async (id, data) => {
     try {
+      const sanitizedItems = data.items.filter((i) => String(i.product_id ?? '').trim());
       await transactionApi.updatePurchase(id, {
         type: 'purchase',
         party_id: Number(data.supplier_id),
-        items: data.items.map((i) => ({
+        items: sanitizedItems.map((i) => ({
           product_id: Number(i.product_id),
           quantity: i.quantity,
           bonus: i.bonus ?? 0,
@@ -1674,10 +1729,11 @@ export const useStore = create<AppState>((set, get) => ({
       const invoiceType = data.invoice_type || 'sale';
       const isSupplier = invoiceType === 'purchase' || invoiceType === 'return_out';
 
+      const sanitizedItems = data.items.filter((i) => String(i.product_id ?? '').trim());
       const request = {
         type: invoiceType,
         party_id: Number(isSupplier ? data.supplier_id : data.customer_id),
-        items: data.items.map((i) => ({
+        items: sanitizedItems.map((i) => ({
           product_id: Number(i.product_id),
           quantity: i.quantity,
           bonus: i.bonus ?? 0,
@@ -1694,7 +1750,10 @@ export const useStore = create<AppState>((set, get) => ({
         notes: '',
       } as const;
 
-      if (invoiceType === 'purchase') {
+      if (invoiceType === 'quotation') {
+        await transactionApi.createQuotation(request);
+        toast.success('Quotation recorded successfully');
+      } else if (invoiceType === 'purchase') {
         await transactionApi.createPurchase(request);
         toast.success('Purchase recorded successfully');
       } else if (invoiceType === 'return_in') {
@@ -1719,10 +1778,11 @@ export const useStore = create<AppState>((set, get) => ({
       const invoiceType = data.invoice_type || 'sale';
       const isSupplier = invoiceType === 'purchase' || invoiceType === 'return_out';
 
+      const sanitizedItems = data.items.filter((i) => String(i.product_id ?? '').trim());
       const request = {
         type: invoiceType,
         party_id: Number(isSupplier ? data.supplier_id : data.customer_id),
-        items: data.items.map((i) => ({
+        items: sanitizedItems.map((i) => ({
           product_id: Number(i.product_id),
           quantity: i.quantity,
           bonus: i.bonus ?? 0,
@@ -1739,7 +1799,10 @@ export const useStore = create<AppState>((set, get) => ({
         notes: '',
       } as const;
 
-      if (invoiceType === 'purchase') {
+      if (invoiceType === 'quotation') {
+        await transactionApi.updateQuotation(id, request);
+        toast.info('Quotation updated successfully');
+      } else if (invoiceType === 'purchase') {
         await transactionApi.updatePurchase(id, request);
         toast.info('Purchase updated successfully');
       } else if (invoiceType === 'return_in') {
@@ -1764,7 +1827,10 @@ export const useStore = create<AppState>((set, get) => ({
       const existing = get().sales.find((s) => s.id === id);
       const invoiceType = existing?.invoice_type || 'sale';
 
-      if (invoiceType === 'purchase') {
+      if (invoiceType === 'quotation') {
+        await transactionApi.deleteQuotation(id);
+        toast.error('Quotation deleted successfully');
+      } else if (invoiceType === 'purchase') {
         await transactionApi.deletePurchase(id);
         toast.error('Purchase deleted successfully');
       } else if (invoiceType === 'return_in') {
@@ -1786,10 +1852,11 @@ export const useStore = create<AppState>((set, get) => ({
 
   addReturn: async (data) => {
     try {
+      const sanitizedItems = data.items.filter((i) => String(i.product_id ?? '').trim());
       await transactionApi.createReturnIn({
         type: 'return_in',
         party_id: Number(data.customer_id),
-        items: data.items.map((i) => ({
+        items: sanitizedItems.map((i) => ({
           product_id: Number(i.product_id),
           quantity: i.quantity,
           bonus: i.bonus ?? 0,
@@ -1814,10 +1881,11 @@ export const useStore = create<AppState>((set, get) => ({
 
   updateReturn: async (id, data) => {
     try {
+      const sanitizedItems = data.items.filter((i) => String(i.product_id ?? '').trim());
       await transactionApi.updateReturnIn(id, {
         type: 'return_in',
         party_id: Number(data.customer_id),
-        items: data.items.map((i) => ({
+        items: sanitizedItems.map((i) => ({
           product_id: Number(i.product_id),
           quantity: i.quantity,
           bonus: i.bonus ?? 0,

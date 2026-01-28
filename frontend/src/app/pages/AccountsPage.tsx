@@ -8,6 +8,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { Plus, Wallet, ArrowRightLeft, ArrowUpRight, ArrowDownLeft, Building2, Smartphone, Banknote, Paperclip, Scan, Calendar, Filter, Save, X, Printer } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns';
+import { formatDateTime, formatDateTimeLong } from '../utils/dateTime';
 import { ActionButtons } from '../components/ui/ActionButtons';
 import { ConfirmationDialog } from '../components/ui/ConfirmationDialog';
 import { Combobox } from '../components/ui/Combobox';
@@ -116,14 +117,14 @@ const AccountDetails = ({ account }: { account: Account }) => {
                     <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Created</label>
                     <div className="mt-1 text-xs text-gray-600">
                         <p>{account.created_by || 'System'}</p>
-                        <p className="text-gray-400">{account.created_at ? format(new Date(account.created_at), 'PPP p') : '-'}</p>
+                        <p className="text-gray-400">{formatDateTimeLong(account.created_at)}</p>
                     </div>
                 </div>
                 <div>
                     <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Updated</label>
                     <div className="mt-1 text-xs text-gray-600">
                         <p>{account.updated_by || 'System'}</p>
-                        <p className="text-gray-400">{account.updated_at ? format(new Date(account.updated_at), 'PPP p') : '-'}</p>
+                        <p className="text-gray-400">{formatDateTimeLong(account.updated_at)}</p>
                     </div>
                 </div>
             </div>
@@ -220,14 +221,14 @@ const TransactionDetails = ({ transaction, accounts, customers }: { transaction:
                     <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Created</label>
                     <div className="mt-1 text-xs text-gray-600">
                         <p>{transaction.created_by || 'System'}</p>
-                        <p className="text-gray-400">{transaction.created_at ? format(new Date(transaction.created_at), 'PPP p') : '-'}</p>
+                        <p className="text-gray-400">{formatDateTimeLong(transaction.created_at)}</p>
                     </div>
                 </div>
                 <div>
                     <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">Updated</label>
                     <div className="mt-1 text-xs text-gray-600">
                         <p>{transaction.updated_by || 'System'}</p>
-                        <p className="text-gray-400">{transaction.updated_at ? format(new Date(transaction.updated_at), 'PPP p') : '-'}</p>
+                        <p className="text-gray-400">{formatDateTimeLong(transaction.updated_at)}</p>
                     </div>
                 </div>
             </div>
@@ -239,7 +240,6 @@ const PaymentDetails = ({ payment, tenant, accounts, customers, onClose }: { pay
     const account = accounts.find(a => a.id === payment.account_id);
 
     const formatDate = (value?: string | null) => value ? format(new Date(value), 'PPP') : '-';
-    const formatDateTime = (value?: string | null) => value ? format(new Date(value), 'yyyy-MM-dd hh:mm a') : '-';
 
     const totalPaid = (payment.details || []).reduce((sum, d) => sum + Number(d.credit_amount || 0), 0);
     const totalDue = (payment.details || []).reduce((sum, d) => sum + Number(d.debit_amount || 0), 0);
