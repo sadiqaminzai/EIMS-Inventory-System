@@ -20,7 +20,8 @@ import {
   ChevronDown,
   X,
   Briefcase,
-  Wallet
+  Wallet,
+  Save
 } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { clsx } from 'clsx';
@@ -248,10 +249,19 @@ export const Layout = () => {
           )}
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
             <Button variant="outline" size="sm" onClick={() => setForcePasswordOpen(false)}>
-              Later
+              <X size={16} className="mr-1" /> Later
             </Button>
-            <Button size="sm" onClick={handleForcePasswordSave} disabled={isUpdatingPassword}>
-              {isUpdatingPassword ? 'Saving...' : 'Update Password'}
+            <Button size="sm" onClick={handleForcePasswordSave} disabled={isUpdatingPassword} className="flex items-center gap-1">
+              {isUpdatingPassword ? (
+                <>
+                  <svg className="animate-spin mr-1" width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /></svg>
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save size={16} className="mr-1" /> Update Password
+                </>
+              )}
             </Button>
           </div>
         </div>

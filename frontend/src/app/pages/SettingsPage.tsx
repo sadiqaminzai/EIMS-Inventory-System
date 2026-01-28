@@ -970,6 +970,7 @@ const RoleForm = ({ initialData, initialPermissions, onSave, onCancel }: { initi
         return_in: 'Sales Return',
         return_out: 'Purchase Return',
         return: 'Sales Return',
+        quotation: 'Quotation',
         account: 'Accounts',
         account_transactions: 'Transactions',
         account_accounts: 'Accounts',
@@ -1086,6 +1087,7 @@ const RoleForm = ({ initialData, initialPermissions, onSave, onCancel }: { initi
                 { key: 'purchase', label: 'Purchases' },
                 { key: 'return_in', label: 'Sales Return' },
                 { key: 'return_out', label: 'Purchase Return' },
+                { key: 'quotation', label: 'Quotation' },
             ],
         },
         {
@@ -1103,6 +1105,8 @@ const RoleForm = ({ initialData, initialPermissions, onSave, onCancel }: { initi
             label: 'Settings',
             groups: [
                 { key: 'settings', label: 'Main' },
+                { key: 'general', label: 'General' },
+                { key: 'profile', label: 'Profile' },
                 { key: 'user', label: 'Users' },
                 { key: 'role', label: 'Roles' },
                 { key: 'permission', label: 'Permissions' },

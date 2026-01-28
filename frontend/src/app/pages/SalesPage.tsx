@@ -364,7 +364,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
     { label: 'Purchase', value: 'purchase', perm: 'purchase.create', title: 'Purchase Invoice' },
     { label: 'P. Return', value: 'return_out', perm: 'return_out.create', title: 'Purchase Return' },
     { label: 'Quotation', value: 'quotation', perm: 'sales.create', title: 'Quotation Invoice' },
-  ].filter(opt => hasPermission(opt.perm as any));
+  ];
 
   return (
     <form onSubmit={handleSubmit(onSave)} className="flex flex-col h-full">

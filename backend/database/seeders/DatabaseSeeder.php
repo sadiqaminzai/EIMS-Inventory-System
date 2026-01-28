@@ -40,6 +40,8 @@ class DatabaseSeeder extends Seeder
         User::query()->delete();
 
         $permissions = [
+                                    'quotation.view', 'quotation.create', 'quotation.edit', 'quotation.delete', 'quotation.search', 'quotation.export', 'quotation.print',
+                        'settings.backup',
             'manage_products',
             'manage_inventory',
             'manage_orders',

@@ -1,0 +1,1 @@
+Temporary file for seeder run confirmation. You can delete this file after verifying the seeder ran successfully.
