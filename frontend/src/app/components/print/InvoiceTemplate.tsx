@@ -141,26 +141,24 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
   );
 
   return (
-    <div ref={ref} id={id} className="bg-white mx-auto text-gray-900 leading-normal flex flex-col relative print:shadow-none" style={{ width: '210mm', minHeight: '297mm', padding: '10mm' }}>
+    <div ref={ref} id={id} 
+    className="bg-white mx-auto text-gray-900 leading-normal flex flex-col relative print:shadow-none" 
+    style={{ width: '210mm', minHeight: '297mm', padding: '10mm' }}
+    >
       <style>{`
         @media print {
             @page { 
                 margin: 0; 
                 size: A4; 
             }
-            
             body { 
                 visibility: hidden; 
                 margin: 0;
                 padding: 0;
             }
-            
-            /* Make sure the invoice container is visible and positioned correctly */
             #${id} {
                 visibility: visible;
-                position: absolute;
-                top: 0;
-                left: 0;
+                position: static !important;
                 width: 210mm;
                 min-height: 297mm;
                 margin: 0;
@@ -169,14 +167,28 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                 z-index: 9999;
                 overflow: visible !important;
             }
-            
             #${id} * {
                 visibility: visible;
             }
-            
-            /* Hide print-specific elements if any */
             .no-print {
                 display: none !important;
+            }
+            /* --- Multi-page print comfort --- */
+            tr, td, th {
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+            }
+            table {
+                page-break-after: auto;
+            }
+            thead {
+                display: table-header-group;
+            }
+            tfoot {
+                display: table-footer-group;
+            }
+            .break-page {
+                page-break-after: always;
             }
         }
       `}</style>
@@ -326,7 +338,10 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
       </div>
       
       {/* Footer Totals */}
-      {renderFooter()}
+    {renderFooter()}
+
+    {/* Optional forced page break before signature section for comfort */}
+    <div className="break-page"></div>
 
       {/* Spacer to push signatures to bottom */}
       <div className="flex-1"></div>

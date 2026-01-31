@@ -31,7 +31,7 @@ class ProductController extends Controller
             });
         }
 
-        $items = $query->paginate(15);
+        $items = $query->paginate(50);
 
         $items->getCollection()->transform(function ($product) {
             return $this->transformProduct($product);
@@ -117,8 +117,9 @@ class ProductController extends Controller
         if ($request->hasFile('photo')) {
             $path = $request->file('photo')->store('products', 'public');
             $data['photo'] = Storage::disk('public')->url($path);
-        } else {
-            unset($data['photo']);
+        } else if (!$request->filled('photo')) {
+            // If no new file and no photo field, preserve the old photo
+            $data['photo'] = $product->photo;
         }
 
         $product->update(array_merge($data, [

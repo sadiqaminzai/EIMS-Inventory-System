@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import styles from './SalesPage.module.css';
 import { useForm, useFieldArray, useWatch, Controller, useFormContext } from 'react-hook-form';
 import { useStore, Sale } from '../../store';
 import { inventoryApi, InventoryBatch } from '../../api/inventory';
@@ -58,15 +59,15 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
   const { fields, append, remove, replace } = useFieldArray({ control, name: 'items' });
   const items = useWatch({ control, name: 'items' }) || [];
     const handleRemoveItem = (index: number) => {
-      const current = getValues('items') || [];
-      const next = current.filter((_: any, i: number) => i !== index);
-      if (next.length === 0) {
-        replace([emptyItem]);
-      } else {
-        replace(next);
-      }
-      trigger();
+      remove(index);
     };
+    // Always keep at least one row in the table (watch the items array, not fields)
+    useEffect(() => {
+      if (items.length === 0) {
+        append({ product_id: '', batch_no: '', quantity: 1, bonus: 0, sale_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, exp_date: '' });
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [items.length]);
   const invoiceType = (watch('invoice_type') || 'sale') as 'sale' | 'purchase' | 'return_in' | 'return_out' | 'quotation';
   const [batchCache, setBatchCache] = useState<Record<number, InventoryBatch[]>>({});
 
@@ -175,10 +176,9 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
 
   // Add new row and focus on product field
   const addNewItem = () => {
-    const newIndex = items.length;
+    // Prevent double-add by disabling button during add, or debounce if needed
     append({ product_id: '', batch_no: '', quantity: 1, bonus: 0, sale_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, exp_date: '' });
-    // Focus on product field after state update
-    focusProductSelect(newIndex);
+    setTimeout(() => focusProductSelect(fields.length), 0);
   };
 
   // Get total stock for a product (sum of all batches, including bonus)
@@ -368,58 +368,54 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
 
   return (
     <form onSubmit={handleSubmit(onSave)} className="flex flex-col h-full">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
-        <Controller
-          key={invoiceType === 'purchase' || invoiceType === 'return_out' ? 'supplier_id' : 'customer_id'}
-          control={control}
-          name={invoiceType === 'purchase' || invoiceType === 'return_out' ? 'supplier_id' : 'customer_id'}
-          rules={{ required: 'Required' }}
-          render={({ field }) => (
-            <SearchableSelect 
-              label={partyLabel}
-              options={partyOptions}
-              value={field.value}
-              onChange={field.onChange}
-              className="bg-white"
-              error={(invoiceType === 'purchase' || invoiceType === 'return_out' ? errors.supplier_id : errors.customer_id)?.message as string}
-              width="340px"
-            />
-          )}
-        />
-        <div className="flex flex-col gap-1">
+      <div className="flex flex-col md:flex-row gap-4 mb-4 bg-gray-50 p-4 rounded-lg border border-gray-200 items-end">
+        <div className="w-full md:w-[340px]">
+          <label className="block text-xs font-semibold text-gray-700 mb-1">
+            {partyLabel.toUpperCase()}
+            {((invoiceType === 'purchase' || invoiceType === 'return_out') && errors.supplier_id) || (invoiceType !== 'purchase' && invoiceType !== 'return_out' && errors.customer_id) ? (
+              <span className="ml-2 text-xs text-red-500 font-normal align-middle">
+                {invoiceType === 'purchase' || invoiceType === 'return_out' ? errors.supplier_id?.message : errors.customer_id?.message}
+              </span>
+            ) : null}
+          </label>
+          <Controller
+            key={invoiceType === 'purchase' || invoiceType === 'return_out' ? 'supplier_id' : 'customer_id'}
+            control={control}
+            name={invoiceType === 'purchase' || invoiceType === 'return_out' ? 'supplier_id' : 'customer_id'}
+            rules={{ required: 'Required' }}
+            render={({ field }) => (
+              <SearchableSelect 
+                label=""
+                options={partyOptions}
+                value={field.value}
+                onChange={field.onChange}
+                className="bg-white"
+                width="340px"
+              />
+            )}
+          />
+        </div>
+        <div className="flex flex-col gap-1 flex-1 min-w-0">
           <span className="text-[10px] font-semibold uppercase text-gray-500">Type</span>
-          <div className="flex flex-row flex-wrap gap-2 items-center text-[11px] whitespace-nowrap">
-            <div className="flex flex-row flex-nowrap gap-2 w-full">
-              {invoiceTypeOptions.map((opt) => (
-                <label
-                  key={opt.value}
-                  title={opt.title}
-                  className="flex items-center gap-1 px-3 py-1 rounded-full border border-gray-300 bg-white hover:bg-blue-50 hover:border-blue-400 transition text-[11px] whitespace-nowrap mb-0"
-                  style={{ marginBottom: 0, flex: '0 0 auto' }}
-                >
-                  <input
-                    type="radio"
-                    value={opt.value}
-                    {...register('invoice_type')}
-                    className="h-3 w-3 text-blue-600 accent-blue-600 mr-1"
-                  />
-                  <span>{opt.label}</span>
-                </label>
-              ))}
-            </div>
+          <div className={styles['invoice-type-radio-group']}>
+            {invoiceTypeOptions.map((opt) => (
+              <label
+                key={opt.value}
+                title={opt.title}
+                className={styles['invoice-type-radio-label']}
+              >
+                <input
+                  type="radio"
+                  value={opt.value}
+                  {...register('invoice_type')}
+                  className="h-3 w-3 text-blue-600 accent-blue-600 mr-1"
+                />
+                <span>{opt.label}</span>
+              </label>
+            ))}
           </div>
         </div>
-        <div className="md:col-span-2 flex flex-col md:flex-row md:items-end md:justify-end gap-4">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={addNewItem}
-            className="flex items-center gap-1 px-2 py-1 rounded-full border border-blue-200 text-blue-600 hover:bg-blue-50 hover:border-blue-400 h-8 text-xs font-semibold shadow-none"
-            style={{ minWidth: 0 }}
-          >
-            <span className="flex items-center justify-center rounded-full bg-blue-100 text-blue-600 w-6 h-6 mr-1 p-0.5"><Plus className="h-4 w-4" /></span>
-            Item
-          </Button>
+        <div className="flex flex-col md:flex-row md:items-end md:justify-end gap-4">
           <DenseInput label="Invoice No" {...register('invoice_no')} readOnly className="bg-gray-100 w-[80px]" />
           <DenseInput label="Invoice Date" type="date" {...register('sale_date', { required: 'Required' })} className="bg-white w-[120px]" />
         </div>
@@ -440,12 +436,22 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                 <th className="px-3 py-2 w-20">Disc %</th>
                 <th className="px-3 py-2 w-20">Tax %</th>
                 <th className="px-3 py-2 w-28 text-right">Amount</th>
-                <th className="px-3 py-2 w-8"></th>
+                <th className="px-3 py-2 w-8">
+                  <button
+                    type="button"
+                    aria-label="Add item"
+                    title="Add new item"
+                    onClick={addNewItem}
+                    className="flex items-center justify-center rounded-full border border-green-200 bg-green-100 text-green-700 hover:bg-green-200 hover:text-green-900 hover:border-green-400 h-6 w-6 p-0 m-0 transition-colors duration-150"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
             {fields.map((field, index) => (
-              <tr key={field.id} className="hover:bg-blue-50/50 transition-colors">
+              <tr key={field.id || index} className="hover:bg-blue-50/50 transition-colors">
                 <td className="px-3 py-2 text-center text-gray-500">{index + 1}</td>
                 <td className="px-3 py-2 w-48 max-w-[12rem] overflow-hidden">
                   <Controller

@@ -51,7 +51,7 @@ export const PrintHandler = ({ data, type, partyName, onAfterPrint }: PrintHandl
   return (
     // Use Tailwind to hide on screen but show on print
     // We apply fixed positioning at 0,0 to eliminate browser margins
-    <div className="hidden print:block print:fixed print:top-0 print:left-0 print:m-0 print:p-0 print:w-[210mm] print:h-auto print:z-[9999]">
+    <div className="hidden print:block print:fixed print:top-0 print:left-0 print:m-0 print:p-0 print:w-[210mm] print:z-[9999]">
       {/* 
         We pass a specific ID for the print styles to target.
         The InvoiceTemplate's internal CSS ensures that during @media print,

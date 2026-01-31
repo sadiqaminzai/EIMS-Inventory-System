@@ -218,7 +218,7 @@ class TransactionController extends Controller
                 'party_type' => Supplier::class,
                 'transaction_date' => $data['date'],
                 'notes' => $data['notes'] ?? null,
-                'total_amount' => 0,
+                // 'total_amount' => 0,
                 'updated_by' => $request->user()->id,
             ]);
 
@@ -386,7 +386,7 @@ class TransactionController extends Controller
                 'party_type' => Customer::class,
                 'transaction_date' => $data['date'],
                 'notes' => $data['notes'] ?? null,
-                'total_amount' => 0,
+                //'total_amount' => 0,
                 'updated_by' => $request->user()->id,
             ]);
 
@@ -744,7 +744,7 @@ class TransactionController extends Controller
                 'party_type' => Customer::class,
                 'transaction_date' => $data['date'],
                 'notes' => $data['notes'] ?? null,
-                'total_amount' => 0,
+                //'total_amount' => 0,
                 'updated_by' => $request->user()->id,
             ]);
 
@@ -818,7 +818,7 @@ class TransactionController extends Controller
                 'party_type' => Customer::class,
                 'transaction_date' => $data['date'],
                 'notes' => $data['notes'] ?? null,
-                'total_amount' => 0,
+                //'total_amount' => 0,
                 'updated_by' => $request->user()->id,
             ]);
 
@@ -894,7 +894,7 @@ class TransactionController extends Controller
                 'party_type' => Supplier::class,
                 'transaction_date' => $data['date'],
                 'notes' => $data['notes'] ?? null,
-                'total_amount' => 0,
+                //'total_amount' => 0,
                 'updated_by' => $request->user()->id,
             ]);
 
