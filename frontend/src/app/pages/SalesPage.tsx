@@ -56,18 +56,17 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
     return Number.isNaN(parsed.getTime()) ? '' : format(parsed, 'yyyy-MM-dd');
   };
 
-  const { fields, append, remove, replace } = useFieldArray({ control, name: 'items' });
+  const { fields, append, replace } = useFieldArray({ control, name: 'items' });
   const items = useWatch({ control, name: 'items' }) || [];
-    const handleRemoveItem = (index: number) => {
-      remove(index);
-    };
-    // Always keep at least one row in the table (watch the items array, not fields)
-    useEffect(() => {
-      if (items.length === 0) {
-        append({ product_id: '', batch_no: '', quantity: 1, bonus: 0, sale_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, exp_date: '' });
-      }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [items.length]);
+  const handleRemoveItem = (index: number) => {
+    const current = getValues('items') || [];
+    const next = current.filter((_: any, i: number) => i !== index);
+    if (next.length === 0) {
+      replace([emptyItem]);
+    } else {
+      replace(next);
+    }
+  };
   const invoiceType = (watch('invoice_type') || 'sale') as 'sale' | 'purchase' | 'return_in' | 'return_out' | 'quotation';
   const [batchCache, setBatchCache] = useState<Record<number, InventoryBatch[]>>({});
 
@@ -887,7 +886,7 @@ export const SalesPage = () => {
         {viewSale && (
             <div className="flex flex-col h-full bg-gray-100">
                  <div className="flex-1 overflow-auto flex justify-center p-0">
-                    <div className="bg-white shadow-lg h-fit scale-[0.9] origin-top my-4 print:fixed print:top-0 print:left-0 print:m-0 print:p-0 print:w-[210mm] print:h-auto print:scale-100 print:shadow-none print:z-[9999]">
+                    <div className="bg-white shadow-lg h-fit scale-[0.9] origin-top my-4 print:hidden">
                         <InvoiceTemplate data={viewSale} type={resolveInvoiceType(viewSale) as any} />
                     </div>
                  </div>
@@ -915,7 +914,7 @@ export const SalesPage = () => {
                       <Button variant="outline" onClick={() => handleDownload(viewSale)}>
                           Download PDF
                       </Button>
-                      <Button onClick={() => window.print()}>
+                      <Button onClick={() => onPrint(viewSale)}>
                           <Printer className="mr-2 h-4 w-4" />
                           Print
                       </Button>

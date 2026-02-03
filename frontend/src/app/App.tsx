@@ -61,7 +61,7 @@ const AppRoutes = () => {
 
 export default function App() {
   return (
-    <BrowserRouter basename="/">
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
       <Toaster position="top-right" richColors />
       <AppRoutes />
     </BrowserRouter>

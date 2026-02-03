@@ -7,6 +7,7 @@ return new class extends Migration
 {
     public function up(): void
     {
+        DB::statement('DROP VIEW IF EXISTS view_product_stock');
         DB::statement(<<<SQL
             CREATE VIEW view_product_stock AS
             SELECT

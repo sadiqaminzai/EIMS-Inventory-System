@@ -151,24 +151,30 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                 margin: 0; 
                 size: A4; 
             }
-            body { 
-                visibility: hidden; 
+            html, body {
+                width: 100%;
+                height: auto !important;
                 margin: 0;
                 padding: 0;
-            }
-            #${id} {
-                visibility: visible;
-                position: static !important;
-                width: 210mm;
-                min-height: 297mm;
-                margin: 0;
-                padding: 10mm !important;
-                background: white;
-                z-index: 9999;
                 overflow: visible !important;
             }
-            #${id} * {
-                visibility: visible;
+            #root {
+                display: none !important;
+            }
+            /* Reset body height for print to allow scrolling/paging */
+            @page {
+                size: auto;
+                margin: 0mm;
+            }
+            #${id} {
+                display: block !important;
+                position: relative !important;
+                width: 100%;
+                margin: 0;
+                padding: 15mm !important;
+                background: white;
+                height: auto !important;
+                overflow: visible !important;
             }
             .no-print {
                 display: none !important;
@@ -193,93 +199,104 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
         }
       `}</style>
       
-      {/* Header */}
-      <div className="flex justify-between items-start mb-6 w-full border-b-2 border-gray-800 pb-4">
-        <div className="flex gap-4 items-center w-full">
-            {printSettings.show_header_logo && tenant.logo && (
-                <img src={tenant.logo} alt="Logo" className="h-20 w-20 object-contain" />
-            )}
-            <div>
-                <h1 className="text-2xl font-bold text-gray-900 uppercase tracking-tight">{tenant.name}</h1>
-                <div className="text-xs text-gray-600 mt-1 space-y-0.5">
-                    <p>{tenant.address}</p>
-                    <p>{tenant.phone} | {tenant.email}</p>
-                    {tenant.license_no && <p>Lic No: {tenant.license_no}</p>}
-                </div>
-            </div>
-        </div>
-      </div>
-
-      {/* Bill To & Invoice Details Row */}
-      <div className="mb-8 flex gap-12 items-start">
-        {/* Left: Supplier/Customer Details */}
-        <div className="flex-1 bg-gray-50 p-4 rounded border border-gray-100 print:bg-gray-50">
-            <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">
-                {isPurchase || isReturnOut ? 'Supplier Details' : 'Bill To'}
-            </h3>
-            {party ? (
-                <div className="text-sm">
-                    <p className="font-bold text-gray-900 text-base">{party.name}</p>
-                    <div className="text-gray-600 mt-1 space-y-0.5 text-xs">
-                        <p>{party.address}</p>
-                        <p>Phone: {party.phone}</p>
-                        {party.email && <p>Email: {party.email}</p>}
+      {/* Main Table Wrapper to allow Header Repetition */}
+      <table className="w-full h-full border-collapse">
+        <thead className="table-header-group">
+            {/* Header / Company Info - Repeats on every page */}
+            <tr>
+                <td colSpan={12} className="pb-4">
+                    <div className="flex justify-between items-start w-full border-b-2 border-gray-800 pb-4">
+                        <div className="flex gap-4 items-center w-full">
+                            {printSettings.show_header_logo && tenant.logo && (
+                                <img src={tenant.logo} alt="Logo" className="h-20 w-20 object-contain" />
+                            )}
+                            <div>
+                                <h1 className="text-2xl font-bold text-gray-900 uppercase tracking-tight">{tenant.name}</h1>
+                                <div className="text-xs text-gray-600 mt-1 space-y-0.5">
+                                    <p>{tenant.address}</p>
+                                    <p>{tenant.phone} | {tenant.email}</p>
+                                    {tenant.license_no && <p>Lic No: {tenant.license_no}</p>}
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                </div>
-            ) : (
-                <p className="text-gray-400 italic text-sm">No party selected</p>
-            )}
-        </div>
+                </td>
+            </tr>
 
-        {/* Right: Title & Invoice Details */}
-        <div className="flex-1 flex flex-col items-end">
-            <h2 className="text-xl font-bold text-gray-800 uppercase tracking-widest mb-4">
-                {isQuotation
-                  ? 'QUOTATION'
-                  : isPurchase
-                  ? 'PURCHASE INVOICE'
-                  : isReturnOut
-                  ? 'PURCHASE RETURN'
-                  : isSale
-                  ? 'SALES INVOICE'
-                  : 'SALES RETURN'}
-            </h2>
+            {/* Bill To Info - Moved to Header */}
+            <tr>
+                <td colSpan={12} className="pb-4 pt-4">
+                    <div className="flex gap-12 items-start">
+                        {/* Left: Supplier/Customer Details */}
+                        <div className="flex-1 bg-gray-50 p-4 rounded border border-gray-100 print:bg-gray-50">
+                            <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">
+                                {isPurchase || isReturnOut ? 'Supplier Details' : 'Bill To'}
+                            </h3>
+                            {party ? (
+                                <div className="text-sm">
+                                    <p className="font-bold text-gray-900 text-base">{party.name}</p>
+                                    <div className="text-gray-600 mt-1 space-y-0.5 text-xs">
+                                        <p>{party.address}</p>
+                                        <p>Phone: {party.phone}</p>
+                                        {party.email && <p>Email: {party.email}</p>}
+                                    </div>
+                                </div>
+                            ) : (
+                                <p className="text-gray-400 italic text-sm">No party selected</p>
+                            )}
+                        </div>
 
-            {/* Invoice Data - Grid for alignment */}
-            <div className="grid grid-cols-[auto_auto] gap-x-4 gap-y-1 text-sm">
-                <span className="text-gray-500 font-medium text-left">Invoice No:</span>
-                <span className="font-bold text-gray-900 text-right">{data.invoice_no}</span>
-                
-                <span className="text-gray-500 font-medium text-left">Date:</span>
-                <span className="font-bold text-gray-900 text-right">{getFormattedDate(getDate())}</span>
-            </div>
-        </div>
-      </div>
+                        {/* Right: Title & Invoice Details */}
+                        <div className="flex-1 flex flex-col items-end">
+                            <h2 className="text-xl font-bold text-gray-800 uppercase tracking-widest mb-4">
+                                {isQuotation
+                                ? 'QUOTATION'
+                                : isPurchase
+                                ? 'PURCHASE INVOICE'
+                                : isReturnOut
+                                ? 'PURCHASE RETURN'
+                                : isSale
+                                ? 'SALES INVOICE'
+                                : 'SALES RETURN'}
+                            </h2>
 
-      {/* Table Content */}
-      <div className="mb-4">
-          <table className="w-full mb-0 border-collapse text-[10px]">
-                <thead>
-                    <tr className="border-b border-gray-800 bg-gray-50 print:bg-gray-50">
-                        <th className="py-2 px-1 text-left font-bold uppercase border-r border-gray-300">Product</th>
-                        {printSettings.show_batch && (
-                            <th className="py-2 px-1 text-center font-bold uppercase border-r border-gray-300 w-16">Batch</th>
-                        )}
-                        {printSettings.show_exp_date && (
-                            <th className="py-2 px-1 text-center font-bold uppercase border-r border-gray-300 w-16">EXP</th>
-                        )}
-                        <th className="py-2 px-1 text-center font-bold uppercase border-r border-gray-300 w-10">Qty</th>
-                        {printSettings.show_bonus && (
-                            <th className="py-2 px-1 text-center font-bold uppercase border-r border-gray-300 w-10">Bon</th>
-                        )}
-                        <th className="py-2 px-1 text-right font-bold uppercase border-r border-gray-300 w-16">Price</th>
-                        <th className="py-2 px-1 text-right font-bold uppercase border-r border-gray-300 w-16">Disc</th>
-                        <th className="py-2 px-1 text-right font-bold uppercase border-r border-gray-300 w-16">Tax</th>
-                        <th className="py-2 px-1 text-right font-bold uppercase w-20">Amount</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                    {data.items.map((item, index) => {
+                            {/* Invoice Data - Grid for alignment */}
+                            <div className="grid grid-cols-[auto_auto] gap-x-4 gap-y-1 text-sm">
+                                <span className="text-gray-500 font-medium text-left">Invoice No:</span>
+                                <span className="font-bold text-gray-900 text-right">{data.invoice_no}</span>
+                                
+                                <span className="text-gray-500 font-medium text-left">Date:</span>
+                                <span className="font-bold text-gray-900 text-right">{getFormattedDate(getDate())}</span>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+
+            {/* Table Headers - Repeats on every page */}
+            <tr className="border-b border-gray-800 bg-gray-50 print:bg-gray-50 text-[10px]">
+                <th className="py-2 px-1 text-left font-bold uppercase border-r border-gray-300">Product</th>
+                {printSettings.show_batch && (
+                    <th className="py-2 px-1 text-center font-bold uppercase border-r border-gray-300 w-16">Batch</th>
+                )}
+                {printSettings.show_exp_date && (
+                    <th className="py-2 px-1 text-center font-bold uppercase border-r border-gray-300 w-16">EXP</th>
+                )}
+                <th className="py-2 px-1 text-center font-bold uppercase border-r border-gray-300 w-10">Qty</th>
+                {printSettings.show_bonus && (
+                    <th className="py-2 px-1 text-center font-bold uppercase border-r border-gray-300 w-10">Bon</th>
+                )}
+                <th className="py-2 px-1 text-right font-bold uppercase border-r border-gray-300 w-16">Price</th>
+                <th className="py-2 px-1 text-right font-bold uppercase border-r border-gray-300 w-16">Disc</th>
+                <th className="py-2 px-1 text-right font-bold uppercase border-r border-gray-300 w-16">Tax</th>
+                <th className="py-2 px-1 text-right font-bold uppercase w-20">Amount</th>
+            </tr>
+        </thead>
+
+        <tbody className="text-[10px]">
+
+            {/* Items */}
+            {data.items.map((item, index) => {
                         const product = products.find(p => p.id === item.product_id);
                         
                         // Normalized fields
@@ -300,7 +317,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                         const itemTaxPct = 'tax_percent' in item ? item.tax_percent : 0;
 
                         return (
-                            <tr key={index} className="break-inside-avoid">
+                            <tr key={index} className="break-inside-avoid border-b border-gray-200">
                                 <td className="py-2 px-1 border-r border-gray-200">
                                     <div className="flex items-center gap-2">
                                         {printSettings.show_product_image && product?.photo && (
@@ -333,22 +350,18 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                             </tr>
                         );
                     })}
-                </tbody>
-          </table>
-      </div>
-      
-      {/* Footer Totals */}
-    {renderFooter()}
+             
+             {/* Totals Row */}
+             <tr>
+                 <td colSpan={12} className="pt-4">
+                     {renderFooter()}
+                 </td>
+             </tr>
 
-    {/* Optional forced page break before signature section for comfort */}
-    <div className="break-page"></div>
-
-      {/* Spacer to push signatures to bottom */}
-      <div className="flex-1"></div>
-
-            {/* Signature Section */}
-            <div className="mt-8 pt-4 border-t border-gray-100">
-                <div className="flex justify-between items-end pb-4 border-b border-gray-200">
+             {/* Signatures */}
+             <tr>
+                 <td colSpan={12} className="pt-8">
+                    <div className="flex justify-between items-end pb-4 border-b border-gray-200">
                           <div className="text-left">
                               <div className="text-[10px] text-gray-500 italic space-y-1">
                                         <div>
@@ -374,12 +387,20 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                                         <p className="text-xs font-bold uppercase text-gray-500">Authorized Signature</p>
                                 </div>
                         )}
-                </div>
-        
-                <div className="text-center text-[8px] text-gray-400 mt-4 italic">
+                    </div>
+                 </td>
+             </tr>
+
+             {/* Footer Branding */}
+             <tr>
+                 <td colSpan={12} className="pt-2 text-center">
+                     <div className="text-[8px] text-gray-400 italic">
                          <p>Powered by: Soft Care IT Solutions - Kabul Afghanistan. +93 789 68 10 10 | +93 70 102 1319 | +93 78 979 5964 | softcareitsolutions.com</p>
-                </div>
-            </div>
+                     </div>
+                 </td>
+             </tr>
+        </tbody>
+      </table>
     </div>
   );
 });

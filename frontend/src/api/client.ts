@@ -1,8 +1,10 @@
 import axios from 'axios';
 
-// This will point to your Laravel Backend URL in the future
-// For now, it can point to a mock server or localhost
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+// API base URL: use env override, otherwise default to local dev or same-host production path
+const API_BASE_URL = import.meta.env.VITE_API_URL
+  || (import.meta.env.PROD
+    ? `${window.location.origin}${import.meta.env.BASE_URL}backend/public/api/v1`
+    : 'http://localhost:8000/api/v1');
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -41,8 +43,9 @@ apiClient.interceptors.response.use(
       localStorage.removeItem('tenant_id');
       localStorage.removeItem('current_user');
       // Redirect to login if unauthorized
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+      const loginPath = `${import.meta.env.BASE_URL}login`;
+      if (window.location.pathname !== loginPath) {
+        window.location.href = loginPath;
       }
     }
     return Promise.reject(error);
