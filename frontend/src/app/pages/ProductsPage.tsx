@@ -37,8 +37,8 @@ const ProductForm = ({ initialData, onSave, onCancel }: { initialData?: Product,
         <DenseInput label="Product Name" {...register('name', { required: 'Required' })} error={errors.name?.message as string} />
         <DenseInput label="Model No" {...register('model_no')} error={errors.model_no?.message as string} />
         
-        <DenseInput type="number" label="Cost Price" {...register('cost_price', { required: 'Required', min: 0 })} error={errors.cost_price?.message as string} />
-        <DenseInput type="number" label="Sale Price" {...register('sale_price', { required: 'Required', min: 0 })} error={errors.sale_price?.message as string} />
+        <DenseInput type="number" step="0.01" label="Cost Price" {...register('cost_price', { required: 'Required', min: 0 })} error={errors.cost_price?.message as string} />
+        <DenseInput type="number" step="0.01" label="Sale Price" {...register('sale_price', { required: 'Required', min: 0 })} error={errors.sale_price?.message as string} />
         
         <DenseSelect 
           label="Brand" 

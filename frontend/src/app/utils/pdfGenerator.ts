@@ -291,8 +291,8 @@ export const generateInvoicePDF = async (
     return Boolean(product?.photo);
   });
   const tableColumn = hasPhotos
-    ? ["Item", "Photo", "Batch", "Exp", "Qty", "Price", "Total"]
-    : ["Item", "Batch", "Exp", "Qty", "Price", "Total"];
+    ? ["Item", "Photo", "Batch", "Exp", "Qty", "Price", "Disc", "Tax", "Net Price", "Amount"]
+    : ["Item", "Batch", "Exp", "Qty", "Price", "Disc", "Tax", "Net Price", "Amount"];
   const tableRows: any[] = [];
   const photoByRow: Record<number, string | undefined> = {};
 
@@ -321,7 +321,14 @@ export const generateInvoicePDF = async (
        exp = formatExpiry((item as any).exp_date);
      }
 
-    const total = item.amount;
+    const itemDisc = Number((item as any).discount ?? 0);
+    const itemTax = Number((item as any).tax ?? 0);
+    const itemDiscPct = Number((item as any).discount_percent ?? 0);
+    const itemTaxPct = Number((item as any).tax_percent ?? 0);
+    const total = Number(item.amount ?? ((qty * price) - itemDisc + itemTax));
+    const netUnitPrice = qty > 0 ? (price - (itemDisc / qty)) : price;
+    const discDisplay = itemDiscPct > 0 ? `${itemDiscPct}%` : (itemDisc > 0 ? `-${itemDisc.toFixed(2)}` : '-');
+    const taxDisplay = itemTaxPct > 0 ? `${itemTaxPct}%` : (itemTax > 0 ? `+${itemTax.toFixed(2)}` : '-');
 
     if (hasPhotos) {
       if (product?.photo) {
@@ -337,6 +344,9 @@ export const generateInvoicePDF = async (
         exp,
         qty,
         price.toFixed(2),
+        discDisplay,
+        taxDisplay,
+        netUnitPrice.toFixed(2),
         total.toFixed(2)
       ]);
     } else {
@@ -346,6 +356,9 @@ export const generateInvoicePDF = async (
         exp,
         qty,
         price.toFixed(2),
+        discDisplay,
+        taxDisplay,
+        netUnitPrice.toFixed(2),
         total.toFixed(2)
       ]);
     }

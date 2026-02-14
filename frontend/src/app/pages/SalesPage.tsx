@@ -109,16 +109,15 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
 
   useEffect(() => {
     const useCostPrice = invoiceType === 'purchase' || invoiceType === 'return_out';
-    items.forEach((item, index) => {
-      if (!item.product_id) return;
+    const currentItems = getValues('items') || [];
+    currentItems.forEach((item: any, index: number) => {
+      if (!item?.product_id) return;
       const prod = products.find(p => p.id === item.product_id);
       if (!prod) return;
       const nextPrice = useCostPrice ? prod.cost_price : prod.sale_price;
-      if (item.sale_price !== nextPrice) {
-        setValue(`items.${index}.sale_price`, nextPrice);
-      }
+      setValue(`items.${index}.sale_price`, nextPrice);
     });
-  }, [invoiceType, items, products, setValue]);
+  }, [invoiceType, products, setValue, getValues]);
 
   const calcLineAmount = (item: any) => {
     const quantity = Number(item?.quantity) || 0;
