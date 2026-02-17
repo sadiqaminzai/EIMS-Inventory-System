@@ -18,7 +18,7 @@ import { PrintHandler } from '../components/print/PrintHandler';
 import { Tooltip, TooltipTrigger, TooltipContent } from '../components/ui/tooltip';
 import { generateInvoicePDF } from '../utils/pdfGenerator';
 
-const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSave: (data: any) => void, onCancel: () => void }) => {
+const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSave: (data: any) => Promise<void> | void, onCancel: () => void }) => {
   const { customers, suppliers, products, currentUser, sales, purchases, returns, printSettings, hasPermission } = useStore();
   const resolveType = (s: Sale) => (s.invoice_type || 'sale') as 'sale' | 'purchase' | 'return_in' | 'return_out' | 'quotation';
   const getNextId = (type: 'sale' | 'purchase' | 'return_in' | 'return_out' | 'quotation') => {
@@ -29,7 +29,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
 
   const emptyItem = { product_id: '', batch_no: '', quantity: 1, bonus: 0, sale_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, exp_date: '' };
 
-  const { register, control, handleSubmit, setValue, watch, trigger, formState: { errors }, setFocus, getValues } = useForm({
+  const { register, control, handleSubmit, setValue, watch, trigger, formState: { errors, isSubmitting }, setFocus, getValues } = useForm({
     shouldUnregister: true,
     defaultValues: initialData || {
       invoice_type: 'sale',
@@ -520,7 +520,25 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                       validate: (value) => {
                         if (!value || value <= 0) return 'Required';
                         if (invoiceType === 'quotation') return true;
-                        if (initialData && (invoiceType === 'sale' || invoiceType === 'return_out')) return true;
+                        if (initialData && (invoiceType === 'sale' || invoiceType === 'return_out')) {
+                          const item = items[index];
+                          if (!item?.product_id) return true;
+                          const currentBonus = item.bonus || 0;
+                          const totalReq = (value || 0) + currentBonus;
+                          const originalItem = initialData.items?.[index];
+                          const originalTotal = originalItem && originalItem.product_id === item.product_id
+                            ? (originalItem.quantity || 0) + (originalItem.bonus || 0)
+                            : 0;
+                          const usedInOtherRows = items.reduce((sum, row, rowIndex) => {
+                            if (rowIndex === index) return sum;
+                            if (row.product_id !== item.product_id) return sum;
+                            return sum + (row.quantity || 0) + (row.bonus || 0);
+                          }, 0);
+                          const availableNow = getTotalStock(item.product_id);
+                          const maxAllowed = Math.max(availableNow + originalTotal - usedInOtherRows, 0);
+                          if (totalReq > maxAllowed) return `Max ${maxAllowed} (incl original)`;
+                          return true;
+                        }
                         // --- original validation logic for other types ---
                         if (invoiceType === 'purchase' || invoiceType === 'return_in') return true;
                         const item = items[index];
@@ -565,7 +583,25 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                         onChange: () => trigger(),
                         validate: (value) => {
                         if (invoiceType === 'quotation') return true;
-                        if (initialData && (invoiceType === 'sale' || invoiceType === 'return_out')) return true;
+                        if (initialData && (invoiceType === 'sale' || invoiceType === 'return_out')) {
+                        const item = items[index];
+                        if (!item?.product_id) return true;
+                          const currentQty = item.quantity || 0;
+                          const totalReq = currentQty + (value || 0);
+                          const originalItem = initialData.items?.[index];
+                          const originalTotal = originalItem && originalItem.product_id === item.product_id
+                            ? (originalItem.quantity || 0) + (originalItem.bonus || 0)
+                            : 0;
+                          const usedInOtherRows = items.reduce((sum, row, rowIndex) => {
+                            if (rowIndex === index) return sum;
+                            if (row.product_id !== item.product_id) return sum;
+                            return sum + (row.quantity || 0) + (row.bonus || 0);
+                          }, 0);
+                          const availableNow = getTotalStock(item.product_id);
+                          const maxAllowed = Math.max(availableNow + originalTotal - usedInOtherRows, 0);
+                          if (totalReq > maxAllowed) return `Max ${maxAllowed} (incl original)`;
+                          return true;
+                        }
                         if (invoiceType === 'purchase' || invoiceType === 'return_in') return true;
                         const item = items[index];
                         if (!item.product_id) return true;
@@ -678,11 +714,11 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
       </div>
 
       <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-gray-100">
-        <Button type="button" variant="outline" onClick={onCancel} size="sm" className="gap-2">
+        <Button type="button" variant="outline" onClick={onCancel} size="sm" className="gap-2" disabled={isSubmitting}>
             <X size={14} /> Cancel
         </Button>
-        <Button type="submit" size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2">
-            <Save size={14} /> Save
+        <Button type="submit" size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2" disabled={isSubmitting}>
+          <Save size={14} /> {isSubmitting ? 'Saving...' : 'Save'}
         </Button>
       </div>
     </form>
@@ -698,11 +734,11 @@ export const SalesPage = () => {
   const [typeFilter, setTypeFilter] = useState<'all' | 'sale' | 'return_in' | 'purchase' | 'return_out' | 'quotation'>('all');
   const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
 
-  const handleSave = (data: any) => {
+  const handleSave = async (data: any) => {
     if (editingSale) {
-      updateSale(editingSale.id, data);
+      await updateSale(editingSale.id, data);
     } else {
-      addSale(data);
+      await addSale(data);
     }
     setIsModalOpen(false);
     setEditingSale(undefined);
