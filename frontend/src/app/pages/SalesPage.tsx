@@ -56,15 +56,13 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
     return Number.isNaN(parsed.getTime()) ? '' : format(parsed, 'yyyy-MM-dd');
   };
 
-  const { fields, append, replace } = useFieldArray({ control, name: 'items' });
+  const { fields, append, replace, remove } = useFieldArray({ control, name: 'items' });
   const items = useWatch({ control, name: 'items' }) || [];
   const handleRemoveItem = (index: number) => {
-    const current = getValues('items') || [];
-    const next = current.filter((_: any, i: number) => i !== index);
-    if (next.length === 0) {
+    if (fields.length <= 1) {
       replace([emptyItem]);
     } else {
-      replace(next);
+      remove(index);
     }
   };
   const invoiceType = (watch('invoice_type') || 'sale') as 'sale' | 'purchase' | 'return_in' | 'return_out' | 'quotation';
@@ -108,6 +106,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
   }, [invoiceType, setValue]);
 
   useEffect(() => {
+    if (initialData) return;
     const useCostPrice = invoiceType === 'purchase' || invoiceType === 'return_out';
     const currentItems = getValues('items') || [];
     currentItems.forEach((item: any, index: number) => {
@@ -117,7 +116,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
       const nextPrice = useCostPrice ? prod.cost_price : prod.sale_price;
       setValue(`items.${index}.sale_price`, nextPrice);
     });
-  }, [invoiceType, products, setValue, getValues]);
+  }, [invoiceType, products, setValue, getValues, initialData]);
 
   const calcLineAmount = (item: any) => {
     const quantity = Number(item?.quantity) || 0;
@@ -521,6 +520,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                       validate: (value) => {
                         if (!value || value <= 0) return 'Required';
                         if (invoiceType === 'quotation') return true;
+                        if (initialData && (invoiceType === 'sale' || invoiceType === 'return_out')) return true;
                         // --- original validation logic for other types ---
                         if (invoiceType === 'purchase' || invoiceType === 'return_in') return true;
                         const item = items[index];
@@ -565,6 +565,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                         onChange: () => trigger(),
                         validate: (value) => {
                         if (invoiceType === 'quotation') return true;
+                        if (initialData && (invoiceType === 'sale' || invoiceType === 'return_out')) return true;
                         if (invoiceType === 'purchase' || invoiceType === 'return_in') return true;
                         const item = items[index];
                         if (!item.product_id) return true;

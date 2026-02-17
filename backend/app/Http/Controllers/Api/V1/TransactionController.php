@@ -148,6 +148,7 @@ class TransactionController extends Controller
                     $item = $update['incoming'];
 
                     $existing->update([
+                        'unit_price' => $item['unit_price'],
                         'discount' => $item['discount'] ?? 0,
                         'discount_percent' => $item['discount_percent'] ?? 0,
                         'tax' => $item['tax'] ?? 0,

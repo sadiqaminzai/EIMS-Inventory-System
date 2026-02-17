@@ -38,15 +38,13 @@ const PurchaseForm = ({ initialData, onSave, onCancel }: { initialData?: Purchas
   });
 
   const { fields, append, remove, replace } = useFieldArray({ control, name: 'items' });
-  const items = watch('items');
+  const items = watch('items') || [];
 
   const handleRemoveItem = (index: number) => {
-    const current = getValues('items') || [];
-    const next = current.filter((_: any, i: number) => i !== index);
-    if (next.length === 0) {
+    if (fields.length <= 1) {
       replace([emptyItem]);
     } else {
-      replace(next);
+      remove(index);
     }
   };
 
@@ -190,7 +188,7 @@ const PurchaseForm = ({ initialData, onSave, onCancel }: { initialData?: Purchas
                   <td className="px-2 py-1"><input type="number" step="0.01" className="w-full h-7 px-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none" {...register(`items.${index}.tax_percent`, { valueAsNumber: true })} onKeyDown={(e) => handleKeyDown(e, index)} /></td>
                   <td className="px-2 py-1 font-medium text-right text-gray-700">{items[index]?.amount?.toFixed(2)}</td>
                   <td className="px-2 py-1 text-center">
-                    <button type="button" onClick={() => handleRemoveItem(index)} className="text-red-500 hover:bg-red-100 p-1 rounded"><Trash2 className="h-3 w-3" /></button>
+                    <button type="button" title="Remove item" aria-label="Remove item" onClick={() => handleRemoveItem(index)} className="text-red-500 hover:bg-red-100 p-1 rounded"><Trash2 className="h-3 w-3" /></button>
                   </td>
                 </tr>
               ))}
