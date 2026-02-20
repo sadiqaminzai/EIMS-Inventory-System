@@ -325,7 +325,7 @@ export const generateInvoicePDF = async (
     const itemTax = Number((item as any).tax ?? 0);
     const itemDiscPct = Number((item as any).discount_percent ?? 0);
     const itemTaxPct = Number((item as any).tax_percent ?? 0);
-    const total = Number(item.amount ?? ((qty * price) - itemDisc + itemTax));
+    const total = Number(((qty * price) - itemDisc + itemTax));
     const netUnitPrice = qty > 0 ? (price - (itemDisc / qty)) : price;
     const discDisplay = itemDiscPct > 0 ? `${itemDiscPct}%` : (itemDisc > 0 ? `-${itemDisc.toFixed(2)}` : '-');
     const taxDisplay = itemTaxPct > 0 ? `${itemTaxPct}%` : (itemTax > 0 ? `+${itemTax.toFixed(2)}` : '-');
@@ -489,7 +489,7 @@ export const generateInvoicePDF = async (
   
   doc.setFontSize(14);
   doc.setTextColor(17, 24, 39); // text-gray-900
-  doc.text(grandTotal.toFixed(2), rightX, footerY, { align: 'right' });
+  doc.text(subTotal.toFixed(2), rightX, footerY, { align: 'right' });
 
   // PAID
   doc.setFontSize(10);

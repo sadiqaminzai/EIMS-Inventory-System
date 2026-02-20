@@ -119,6 +119,7 @@ export interface Customer extends BaseEntity {
 }
 
 export interface PurchaseItem {
+  order_item_id?: string;
   product_id: string;
   cost_price: number;
   batch_no: string;
@@ -147,6 +148,7 @@ export interface Purchase extends BaseEntity {
 }
 
 export interface SalesItem {
+  order_item_id?: string;
   product_id: string;
   sale_price: number;
   batch_no: string;
@@ -176,6 +178,7 @@ export interface Sale extends BaseEntity {
 }
 
 export interface ReturnItem {
+  order_item_id?: string;
   product_id: string;
   batch_no: string;
   quantity: number;
@@ -876,6 +879,7 @@ export const useStore = create<AppState>((set, get) => ({
           supplier_id: String(o.party_id ?? ''),
           purchase_date: toDateInput(o.transaction_date ?? ''),
           items: (o.items ?? []).map((i: any) => ({
+            order_item_id: String(i.id ?? ''),
             product_id: String(i.product_id ?? ''),
             cost_price: Number(i.unit_price ?? 0),
             batch_no: String(i.batch_no ?? ''),
@@ -908,6 +912,7 @@ export const useStore = create<AppState>((set, get) => ({
           invoice_type: 'sale' as const,
           sale_date: toDateInput(o.transaction_date ?? ''),
           items: (o.items ?? []).map((i: any) => ({
+            order_item_id: String(i.id ?? ''),
             product_id: String(i.product_id ?? ''),
             sale_price: Number(i.unit_price ?? 0),
             batch_no: String(i.batch_no ?? ''),
@@ -938,6 +943,7 @@ export const useStore = create<AppState>((set, get) => ({
             invoice_type: 'purchase' as const,
              sale_date: toDateInput(o.transaction_date ?? ''),
             items: (o.items ?? []).map((i: any) => ({
+              order_item_id: String(i.id ?? ''),
               product_id: String(i.product_id ?? ''),
               sale_price: Number(i.unit_price ?? 0),
               batch_no: String(i.batch_no ?? ''),
@@ -968,6 +974,7 @@ export const useStore = create<AppState>((set, get) => ({
             invoice_type: 'return_in' as const,
             sale_date: toDateInput(o.transaction_date ?? ''),
             items: (o.items ?? []).map((i: any) => ({
+              order_item_id: String(i.id ?? ''),
               product_id: String(i.product_id ?? ''),
               sale_price: Number(i.unit_price ?? 0),
               batch_no: String(i.batch_no ?? ''),
@@ -998,6 +1005,7 @@ export const useStore = create<AppState>((set, get) => ({
             invoice_type: 'return_out' as const,
             sale_date: toDateInput(o.transaction_date ?? ''),
             items: (o.items ?? []).map((i: any) => ({
+              order_item_id: String(i.id ?? ''),
               product_id: String(i.product_id ?? ''),
               sale_price: Number(i.unit_price ?? 0),
               batch_no: String(i.batch_no ?? ''),
@@ -1028,6 +1036,7 @@ export const useStore = create<AppState>((set, get) => ({
             invoice_type: 'quotation' as const,
             sale_date: toDateInput(o.transaction_date ?? ''),
             items: (o.items ?? []).map((i: any) => ({
+              order_item_id: String(i.id ?? ''),
               product_id: String(i.product_id ?? ''),
               sale_price: Number(i.unit_price ?? 0),
               batch_no: String(i.batch_no ?? ''),

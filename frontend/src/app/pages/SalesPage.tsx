@@ -27,7 +27,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
     return max + 1;
   };
 
-  const emptyItem = { product_id: '', batch_no: '', quantity: 1, bonus: 0, sale_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, exp_date: '' };
+  const emptyItem = { order_item_id: '', product_id: '', batch_no: '', quantity: 1, bonus: 0, sale_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, exp_date: '' };
 
   const { register, control, handleSubmit, setValue, watch, trigger, formState: { errors, isSubmitting }, setFocus, getValues } = useForm({
     shouldUnregister: true,
@@ -67,6 +67,26 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
   };
   const invoiceType = (watch('invoice_type') || 'sale') as 'sale' | 'purchase' | 'return_in' | 'return_out' | 'quotation';
   const [batchCache, setBatchCache] = useState<Record<number, InventoryBatch[]>>({});
+  const [focusedProductId, setFocusedProductId] = useState<string>('');
+
+  const getOriginalTotalForRow = (item: any) => {
+    if (!initialData) return 0;
+    const currentProductId = item?.product_id;
+    if (!currentProductId) return 0;
+
+    const orderItemId = String(item?.order_item_id ?? '').trim();
+    if (!orderItemId) return 0;
+
+    const originalItem = initialData.items?.find(
+      (original: any) => String(original?.order_item_id ?? '').trim() === orderItemId
+    );
+
+    if (!originalItem || originalItem.product_id !== currentProductId) {
+      return 0;
+    }
+
+    return (originalItem.quantity || 0) + (originalItem.bonus || 0);
+  };
 
   useEffect(() => {
     let active = true;
@@ -117,6 +137,13 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
       setValue(`items.${index}.sale_price`, nextPrice);
     });
   }, [invoiceType, products, setValue, getValues, initialData]);
+
+  const calcGrossLineTotal = (item: any) => {
+    const quantity = Number(item?.quantity) || 0;
+    const salePrice = Number(item?.sale_price) || 0;
+    if (quantity <= 0 || salePrice <= 0) return 0;
+    return quantity * salePrice;
+  };
 
   const calcLineAmount = (item: any) => {
     const quantity = Number(item?.quantity) || 0;
@@ -174,7 +201,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
   // Add new row and focus on product field
   const addNewItem = () => {
     // Prevent double-add by disabling button during add, or debounce if needed
-    append({ product_id: '', batch_no: '', quantity: 1, bonus: 0, sale_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, exp_date: '' });
+    append({ order_item_id: '', product_id: '', batch_no: '', quantity: 1, bonus: 0, sale_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, exp_date: '' });
     setTimeout(() => focusProductSelect(fields.length), 0);
   };
 
@@ -318,11 +345,19 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
     }, 50);
   };
 
-  const handleProductChange = (index: number, productId: string) => {
+  const handleProductChange = (index: number, productId: string, previousProductId?: string) => {
     const prod = products.find(p => p.id === productId);
     if (prod) {
+      const isEditingSameExistingItem = Boolean(
+        initialData &&
+        previousProductId &&
+        previousProductId === productId &&
+        Number(getValues(`items.${index}.sale_price`) || 0) > 0
+      );
       const useCostPrice = invoiceType === 'purchase' || invoiceType === 'return_out';
-      setValue(`items.${index}.sale_price`, useCostPrice ? prod.cost_price : prod.sale_price);
+      if (!isEditingSameExistingItem) {
+        setValue(`items.${index}.sale_price`, useCostPrice ? prod.cost_price : prod.sale_price);
+      }
       if (invoiceType === 'sale' || invoiceType === 'return_out') {
         const fifo = getFifoBatchForRow(productId, index);
         setValue(`items.${index}.batch_no`, fifo.batch_no || '');
@@ -338,10 +373,13 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
   const handleKeyDown = (e: React.KeyboardEvent, index: number) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      append({ product_id: '', batch_no: '', quantity: 1, bonus: 0, sale_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, exp_date: '' });
+      append({ order_item_id: '', product_id: '', batch_no: '', quantity: 1, bonus: 0, sale_price: 0, discount_percent: 0, tax_percent: 0, discount: 0, tax: 0, amount: 0, exp_date: '' });
       focusProductSelect(index + 1);
     }
   };
+
+  const footerStockProductId = focusedProductId || items.find((item) => item?.product_id)?.product_id || '';
+  const footerTotalStock = footerStockProductId ? getTotalStock(footerStockProductId) : 0;
 
   const priceLabel = invoiceType === 'purchase' || invoiceType === 'return_out' ? 'Cost' : 'Price';
   const partyLabel = invoiceType === 'purchase' || invoiceType === 'return_out' ? 'Supplier' : 'Customer';
@@ -482,8 +520,10 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                           })}
                         value={field.value}
                         onChange={(val) => {
+                          const previousProductId = String(field.value || '');
                             field.onChange(val);
-                            handleProductChange(index, val);
+                          setFocusedProductId(val);
+                          handleProductChange(index, val, previousProductId);
                         }}
                         placeholder="Select Product"
                         width="380px"
@@ -525,10 +565,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                           if (!item?.product_id) return true;
                           const currentBonus = item.bonus || 0;
                           const totalReq = (value || 0) + currentBonus;
-                          const originalItem = initialData.items?.[index];
-                          const originalTotal = originalItem && originalItem.product_id === item.product_id
-                            ? (originalItem.quantity || 0) + (originalItem.bonus || 0)
-                            : 0;
+                          const originalTotal = getOriginalTotalForRow(item);
                           const usedInOtherRows = items.reduce((sum, row, rowIndex) => {
                             if (rowIndex === index) return sum;
                             if (row.product_id !== item.product_id) return sum;
@@ -588,10 +625,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                         if (!item?.product_id) return true;
                           const currentQty = item.quantity || 0;
                           const totalReq = currentQty + (value || 0);
-                          const originalItem = initialData.items?.[index];
-                          const originalTotal = originalItem && originalItem.product_id === item.product_id
-                            ? (originalItem.quantity || 0) + (originalItem.bonus || 0)
-                            : 0;
+                          const originalTotal = getOriginalTotalForRow(item);
                           const usedInOtherRows = items.reduce((sum, row, rowIndex) => {
                             if (rowIndex === index) return sum;
                             if (row.product_id !== item.product_id) return sum;
@@ -673,7 +707,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
           </div>
           <div className="absolute left-40 top-1/2 -translate-y-1/2 flex items-center gap-1">
             <span className="text-gray-500">Total Stock:</span>
-            <span className="font-bold text-gray-600">{[...new Set(items.map(i => i.product_id).filter(Boolean))].reduce((sum, pid) => sum + getTotalStock(pid), 0)}</span>
+            <span className="font-bold text-gray-600">{footerTotalStock}</span>
           </div>
           {printSettings?.show_bonus && (
             <div className="absolute left-64 top-1/2 -translate-y-1/2 flex items-center gap-1">

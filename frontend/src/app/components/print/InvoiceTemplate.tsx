@@ -94,15 +94,6 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
     const fallbackTotalAmount = totalAmount || data.items.reduce((acc, item) => acc + (item.quantity * (('cost_price' in item || isPurchase || isReturnOut) ? ((item as any).cost_price ?? (item as any).sale_price ?? 0) : (item as any).sale_price ?? 0)), 0);
     const fallbackTotalDiscount = totalDiscount || data.items.reduce((acc, item) => acc + ((item as any).discount ?? 0), 0);
     const fallbackTotalTax = totalTax || data.items.reduce((acc, item) => acc + ((item as any).tax ?? 0), 0);
-        const fallbackDiscountedSubtotal = data.items.reduce((acc, item) => {
-            const qty = Number(item.quantity) || 0;
-            const price = ('cost_price' in item || isPurchase || isReturnOut)
-                ? ((item as any).cost_price ?? (item as any).sale_price ?? 0)
-                : ((item as any).sale_price ?? 0);
-            const lineTotal = qty * price;
-            const itemDisc = Number((item as any).discount ?? 0);
-            return acc + (lineTotal - itemDisc);
-        }, 0);
         const fallbackNetAmount = (grandTotal || (fallbackTotalAmount - fallbackTotalDiscount + fallbackTotalTax));
     const remainingAmount = fallbackNetAmount - paidAmount;
 
@@ -119,7 +110,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
             </div>
             <div className="flex flex-col items-center">
                 <span className="text-[9px] font-medium text-gray-500 uppercase tracking-wider mb-1">Total</span>
-                <span className="font-bold text-gray-900 text-sm">{fallbackDiscountedSubtotal.toFixed(2)}</span>
+                <span className="font-bold text-gray-900 text-sm">{fallbackTotalAmount.toFixed(2)}</span>
             </div>
             <div className="flex flex-col items-center">
                 <span className="text-[9px] font-medium text-gray-500 uppercase tracking-wider mb-1">Discount</span>
@@ -360,7 +351,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                                     {itemTaxPct && itemTaxPct > 0 ? `${itemTaxPct}%` : (itemTax > 0 ? `+${itemTax.toFixed(2)}` : '-')}
                                 </td>
                                 <td className="py-2 px-1 text-right border-r border-gray-200">{netUnitPrice.toFixed(2)}</td>
-                                <td className="py-2 px-1 text-right font-bold">{(item.amount ?? computedAmount).toFixed(2)}</td>
+                                <td className="py-2 px-1 text-right font-bold">{computedAmount.toFixed(2)}</td>
                             </tr>
                         );
                     })}
