@@ -44,9 +44,9 @@ class PaymentController extends Controller
             'notes' => ['nullable', 'string'],
             'details' => ['required', 'array', 'min:1'],
             'details.*.customer_id' => ['required', 'integer'],
-            'details.*.debit_amount' => ['required', 'numeric', 'min:0'],
+            'details.*.debit_amount' => ['nullable', 'numeric', 'min:0'],
             'details.*.credit_amount' => ['required', 'numeric', 'min:0'],
-            'details.*.balance_amount' => ['required', 'numeric', 'min:0'],
+            'details.*.balance_amount' => ['nullable', 'numeric', 'min:0'],
             'details.*.remarks' => ['nullable', 'string'],
         ]);
 
@@ -54,9 +54,13 @@ class PaymentController extends Controller
 
         $payment = DB::transaction(function () use ($data, $details, $request) {
             $serial = (new ModuleSequenceService())->next('payment');
-            $totalPending = collect($details)->sum('debit_amount');
-            $totalReceived = collect($details)->sum('credit_amount');
-            $totalPendingAfter = collect($details)->sum('balance_amount');
+            $customerIds = collect($details)->pluck('customer_id')->unique()->values()->all();
+            $dueByCustomer = $this->getCustomerDueMap($customerIds);
+            $normalizedDetails = $this->normalizePaymentDetails($details, $dueByCustomer);
+
+            $totalPending = collect($normalizedDetails)->sum('debit_amount');
+            $totalReceived = collect($normalizedDetails)->sum('credit_amount');
+            $totalPendingAfter = collect($normalizedDetails)->sum('balance_amount');
 
             $payment = Payment::create([
                 'account_id' => $data['account_id'],
@@ -73,7 +77,7 @@ class PaymentController extends Controller
                 'updated_by' => $request->user()->id,
             ]);
 
-            foreach ($details as $detail) {
+            foreach ($normalizedDetails as $detail) {
                 PaymentDetail::create([
                     'payment_id' => $payment->id,
                     'customer_id' => $detail['customer_id'],
@@ -108,7 +112,7 @@ class PaymentController extends Controller
                 $account->increment('balance', $totalReceived);
             }
 
-            foreach ($details as $detail) {
+            foreach ($normalizedDetails as $detail) {
                 $amount = (float) ($detail['credit_amount'] ?? 0);
                 if ($amount <= 0) {
                     continue;
@@ -219,9 +223,9 @@ class PaymentController extends Controller
             'notes' => ['nullable', 'string'],
             'details' => ['required', 'array', 'min:1'],
             'details.*.customer_id' => ['required', 'integer'],
-            'details.*.debit_amount' => ['required', 'numeric', 'min:0'],
+            'details.*.debit_amount' => ['nullable', 'numeric', 'min:0'],
             'details.*.credit_amount' => ['required', 'numeric', 'min:0'],
-            'details.*.balance_amount' => ['required', 'numeric', 'min:0'],
+            'details.*.balance_amount' => ['nullable', 'numeric', 'min:0'],
             'details.*.remarks' => ['nullable', 'string'],
         ]);
 
@@ -242,9 +246,13 @@ class PaymentController extends Controller
                 $this->reversePaymentFromOrders((int) $detail->customer_id, $amount, $request->user()->id);
             }
 
-            $totalPending = collect($details)->sum('debit_amount');
-            $totalReceived = collect($details)->sum('credit_amount');
-            $totalPendingAfter = collect($details)->sum('balance_amount');
+            $customerIds = collect($details)->pluck('customer_id')->unique()->values()->all();
+            $dueByCustomer = $this->getCustomerDueMap($customerIds);
+            $normalizedDetails = $this->normalizePaymentDetails($details, $dueByCustomer);
+
+            $totalPending = collect($normalizedDetails)->sum('debit_amount');
+            $totalReceived = collect($normalizedDetails)->sum('credit_amount');
+            $totalPendingAfter = collect($normalizedDetails)->sum('balance_amount');
 
             $newAccountId = (int) $data['account_id'];
 
@@ -316,7 +324,7 @@ class PaymentController extends Controller
             ]);
 
             $payment->details()->delete();
-            foreach ($details as $detail) {
+            foreach ($normalizedDetails as $detail) {
                 PaymentDetail::create([
                     'payment_id' => $payment->id,
                     'customer_id' => $detail['customer_id'],
@@ -329,7 +337,7 @@ class PaymentController extends Controller
                 ]);
             }
 
-            foreach ($details as $detail) {
+            foreach ($normalizedDetails as $detail) {
                 $amount = (float) ($detail['credit_amount'] ?? 0);
                 if ($amount <= 0) {
                     continue;
@@ -406,5 +414,51 @@ class PaymentController extends Controller
 
             $remaining -= $apply;
         }
+    }
+
+    protected function getCustomerDueMap(array $customerIds): array
+    {
+        if (empty($customerIds)) {
+            return [];
+        }
+
+        return Order::query()
+            ->where('transaction_type', 'sale')
+            ->where('party_type', Customer::class)
+            ->whereIn('party_id', $customerIds)
+            ->selectRaw('party_id, SUM(due_amount) as total_due')
+            ->groupBy('party_id')
+            ->pluck('total_due', 'party_id')
+            ->map(fn ($due) => (float) $due)
+            ->all();
+    }
+
+    protected function normalizePaymentDetails(array $details, array $dueByCustomer): array
+    {
+        $remainingByCustomer = [];
+        foreach ($dueByCustomer as $customerId => $due) {
+            $remainingByCustomer[(int) $customerId] = max((float) $due, 0);
+        }
+
+        $normalized = [];
+        foreach ($details as $detail) {
+            $customerId = (int) ($detail['customer_id'] ?? 0);
+            $remainingByCustomer[$customerId] ??= 0;
+            $debitAmount = (float) $remainingByCustomer[$customerId];
+            $creditInput = (float) ($detail['credit_amount'] ?? 0);
+            $creditAmount = min(max($creditInput, 0), $debitAmount);
+            $balanceAmount = max($debitAmount - $creditAmount, 0);
+            $remainingByCustomer[$customerId] = $balanceAmount;
+
+            $normalized[] = [
+                'customer_id' => $customerId,
+                'debit_amount' => $debitAmount,
+                'credit_amount' => $creditAmount,
+                'balance_amount' => $balanceAmount,
+                'remarks' => $detail['remarks'] ?? null,
+            ];
+        }
+
+        return $normalized;
     }
 }
