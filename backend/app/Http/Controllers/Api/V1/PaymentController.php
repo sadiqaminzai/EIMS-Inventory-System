@@ -443,8 +443,10 @@ class PaymentController extends Controller
         $normalized = [];
         foreach ($details as $detail) {
             $customerId = (int) ($detail['customer_id'] ?? 0);
-            $debitAmount = (float) ($remainingByCustomer[$customerId] ?? 0);
-            $creditAmount = min(max((float) ($detail['credit_amount'] ?? 0), 0), $debitAmount);
+            $remainingByCustomer[$customerId] ??= 0;
+            $debitAmount = (float) $remainingByCustomer[$customerId];
+            $creditInput = (float) ($detail['credit_amount'] ?? 0);
+            $creditAmount = min(max($creditInput, 0), $debitAmount);
             $balanceAmount = max($debitAmount - $creditAmount, 0);
             $remainingByCustomer[$customerId] = $balanceAmount;
 

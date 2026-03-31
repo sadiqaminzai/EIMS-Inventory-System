@@ -8,7 +8,7 @@ use ReflectionMethod;
 
 class PaymentControllerTest extends TestCase
 {
-    public function test_normalize_payment_details_uses_calculated_pending_and_clamps_credit(): void
+    public function test_normalize_payment_details_calculates_debit_and_clamps_credit(): void
     {
         $controller = new PaymentController();
 
@@ -54,4 +54,3 @@ class PaymentControllerTest extends TestCase
         $this->assertSame(0.0, $normalized[2]['balance_amount']);
     }
 }
-
