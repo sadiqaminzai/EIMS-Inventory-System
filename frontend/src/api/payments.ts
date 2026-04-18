@@ -1,16 +1,25 @@
 import apiClient from './client';
 
+export interface PaymentAllocationDto {
+  order_id?: number;
+  sale_invoice_id?: number;
+  amount: number;
+}
+
 export interface PaymentDetailDto {
-  customer_id: number;
+  customer_id?: number;
+  supplier_id?: number;
   debit_amount: number;
   credit_amount: number;
   balance_amount: number;
   remarks?: string | null;
+  allocations?: PaymentAllocationDto[];
 }
 
 export interface PaymentDto {
   id?: number;
   serial_no?: string;
+  payment_type?: 'receivable' | 'payable';
   date: string;
   account_id: number;
   currency: string;

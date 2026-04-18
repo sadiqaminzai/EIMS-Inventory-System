@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { useStore, Account, Transaction, Payment } from '../../store';
 import { Button } from '../components/ui/button';
 import { DenseTable } from '../components/ui/DenseTable';
@@ -15,6 +16,20 @@ import { Combobox } from '../components/ui/Combobox';
 import { TransactionForm } from '../components/forms/TransactionForm';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import { paymentApi } from '../../api/payments';
+
+type LedgerPaymentPrefillState = {
+    openPaymentWith?: {
+        payment_type?: 'receivable' | 'payable';
+        customer_id?: number;
+        customer_name?: string;
+        supplier_id?: number;
+        supplier_name?: string;
+        order_id?: number;
+        invoice_no?: string;
+        due_amount: number;
+        auto_allocate?: boolean;
+    };
+};
 
 // --- Account Form ---
 const AccountForm = ({ initialData, onSave, onCancel }: { initialData?: Account, onSave: (data: any) => void, onCancel: () => void }) => {
@@ -236,10 +251,20 @@ const TransactionDetails = ({ transaction, accounts, customers }: { transaction:
     );
 };
 
-const PaymentDetails = ({ payment, tenant, accounts, customers, onClose }: { payment: Payment, tenant: any, accounts: Account[], customers: any[], onClose: () => void }) => {
+const PaymentDetails = ({ payment, tenant, accounts, customers, suppliers, onClose }: { payment: Payment, tenant: any, accounts: Account[], customers: any[], suppliers: any[], onClose: () => void }) => {
     const account = accounts.find(a => a.id === payment.account_id);
+    const paymentType = (payment as any).payment_type === 'payable' ? 'payable' : 'receivable';
+    const partyLabel = paymentType === 'payable' ? 'Supplier' : 'Customer';
+    const paymentTitle = paymentType === 'payable' ? 'PAYMENT VOUCHER' : 'PAYMENT RECEIPT';
 
     const formatDate = (value?: string | null) => value ? format(new Date(value), 'PPP') : '-';
+    const resolvePartyName = (detail: any) => {
+        if (paymentType === 'payable') {
+            return suppliers.find((s) => String(s.id) === String(detail.supplier_id || ''))?.name || '-';
+        }
+
+        return customers.find((c) => String(c.id) === String(detail.customer_id || ''))?.name || '-';
+    };
 
     const totalPaid = (payment.details || []).reduce((sum, d) => sum + Number(d.credit_amount || 0), 0);
     const totalDue = (payment.details || []).reduce((sum, d) => sum + Number(d.debit_amount || 0), 0);
@@ -297,7 +322,7 @@ const PaymentDetails = ({ payment, tenant, accounts, customers, onClose }: { pay
                                         </div>
                                     </div>
                                     <div className="text-right pr-2">
-                                        <div className="text-[20px] font-bold text-blue-600 leading-tight">PAYMENT RECEIPT</div>
+                                        <div className="text-[20px] font-bold text-blue-600 leading-tight">{paymentTitle}</div>
                                         <div className="text-xs text-gray-500">Serial: {payment.serial_no || payment.id}</div>
                                         <div className="text-xs text-gray-500">Date: {formatDate(payment.date)}</div>
                                         <div className="text-xs text-gray-500">Printed: {formatDateTime(new Date().toISOString())}</div>
@@ -309,7 +334,7 @@ const PaymentDetails = ({ payment, tenant, accounts, customers, onClose }: { pay
                                         <thead className="bg-gray-50 text-gray-600">
                                             <tr>
                                                 <th className="px-3 py-2 text-left w-12">S.No</th>
-                                                <th className="px-3 py-2 text-left">Customer</th>
+                                                <th className="px-3 py-2 text-left">{partyLabel}</th>
                                                 <th className="px-3 py-2 text-right w-28">Due</th>
                                                 <th className="px-3 py-2 text-right w-28">Paid</th>
                                                 <th className="px-3 py-2 text-right w-28">Balance</th>
@@ -318,11 +343,10 @@ const PaymentDetails = ({ payment, tenant, accounts, customers, onClose }: { pay
                                         </thead>
                                         <tbody className="divide-y">
                                             {(payment.details || []).map((d, idx) => {
-                                                const customer = customers.find((c) => String(c.id) === String(d.customer_id));
                                                 return (
-                                                    <tr key={`print-${d.customer_id}-${idx}`}>
+                                                    <tr key={`print-${(d as any).customer_id ?? (d as any).supplier_id ?? idx}-${idx}`}>
                                                         <td className="px-3 py-2">{idx + 1}</td>
-                                                        <td className="px-3 py-2">{customer?.name || '-'}</td>
+                                                        <td className="px-3 py-2">{resolvePartyName(d)}</td>
                                                         <td className="px-3 py-2 text-right">{Number(d.debit_amount || 0).toFixed(2)}</td>
                                                         <td className="px-3 py-2 text-right">{Number(d.credit_amount || 0).toFixed(2)}</td>
                                                         <td className="px-3 py-2 text-right">{Number(d.balance_amount || 0).toFixed(2)}</td>
@@ -389,7 +413,7 @@ const PaymentDetails = ({ payment, tenant, accounts, customers, onClose }: { pay
                                 </div>
                             </div>
                             <div className="text-right pr-2">
-                                <div className="text-[20px] font-bold text-blue-600 leading-tight">PAYMENT RECEIPT</div>
+                                <div className="text-[20px] font-bold text-blue-600 leading-tight">{paymentTitle}</div>
                                 <div className="text-xs text-gray-500">Serial: {payment.serial_no || payment.id}</div>
                                 <div className="text-xs text-gray-500">Date: {formatDate(payment.date)}</div>
                                 <div className="text-xs text-gray-500">Printed: {formatDateTime(new Date().toISOString())}</div>
@@ -401,7 +425,7 @@ const PaymentDetails = ({ payment, tenant, accounts, customers, onClose }: { pay
                                 <thead className="bg-gray-50 text-gray-600">
                                     <tr>
                                         <th className="px-3 py-2 text-left w-12">S.No</th>
-                                        <th className="px-3 py-2 text-left">Customer</th>
+                                        <th className="px-3 py-2 text-left">{partyLabel}</th>
                                         <th className="px-3 py-2 text-right w-28">Due</th>
                                         <th className="px-3 py-2 text-right w-28">Paid</th>
                                         <th className="px-3 py-2 text-right w-28">Balance</th>
@@ -410,11 +434,10 @@ const PaymentDetails = ({ payment, tenant, accounts, customers, onClose }: { pay
                                 </thead>
                                 <tbody className="divide-y">
                                     {(payment.details || []).map((d, idx) => {
-                                        const customer = customers.find((c) => String(c.id) === String(d.customer_id));
                                         return (
-                                            <tr key={`${d.customer_id}-${idx}`}>
+                                            <tr key={`${(d as any).customer_id ?? (d as any).supplier_id ?? idx}-${idx}`}>
                                                 <td className="px-3 py-2">{idx + 1}</td>
-                                                <td className="px-3 py-2">{customer?.name || '-'}</td>
+                                                <td className="px-3 py-2">{resolvePartyName(d)}</td>
                                                 <td className="px-3 py-2 text-right">{Number(d.debit_amount || 0).toFixed(2)}</td>
                                                 <td className="px-3 py-2 text-right">{Number(d.credit_amount || 0).toFixed(2)}</td>
                                                 <td className="px-3 py-2 text-right">{Number(d.balance_amount || 0).toFixed(2)}</td>
@@ -498,7 +521,9 @@ export const AccountsPage = () => {
     // Attempt to destructure updateTransaction. If it's missing in store type but present in runtime, this works.
     // If missing in runtime, we'll handle it carefully.
     const store = useStore();
-    const { accounts, transactions, addAccount, updateAccount, deleteAccount, addTransaction, addPayment, updatePayment, deleteTransaction, hasPermission, customers, tenant } = store;
+    const { accounts, transactions, addAccount, updateAccount, deleteAccount, addTransaction, addPayment, updatePayment, deleteTransaction, hasPermission, customers, suppliers, tenant, currentUser } = store;
+    const location = useLocation();
+    const navigate = useNavigate();
     
     // Fallback for updateTransaction if it doesn't exist in store
     const updateTransaction = (store as any).updateTransaction || ((id: string, data: any) => {
@@ -520,6 +545,59 @@ export const AccountsPage = () => {
             setActiveTab(visibleTabs[0].id as 'accounts' | 'transactions');
         }
     }, [visibleTabs, activeTab]);
+
+    useEffect(() => {
+        const prefill = (location.state as LedgerPaymentPrefillState | null)?.openPaymentWith;
+        if (!prefill) return;
+
+        const prefillType = prefill.payment_type === 'payable' ? 'payable' : 'receivable';
+
+        const fallbackAccount =
+            accounts.find((account) => /cash in hand/i.test(account.name)) ||
+            accounts.find((account) => account.type === 'Cash') ||
+            accounts[0];
+
+        const dueAmount = Number(prefill.due_amount || 0);
+        const paidNow = dueAmount > 0 ? dueAmount.toFixed(2) : '';
+        const shouldAutoAllocate = prefill.auto_allocate ?? !prefill.order_id;
+
+        setPaymentPrefill({
+            date: new Date().toISOString().split('T')[0],
+            type: 'Payment',
+            payment_type: prefillType,
+            payment_method: 'Cash',
+            currency: fallbackAccount?.currency || 'USD',
+            account_id: fallbackAccount?.id || '',
+            salesman: '',
+            booker: currentUser?.name || '',
+            notes: prefill.invoice_no
+                ? (prefillType === 'payable'
+                    ? `Payment made for ${prefill.invoice_no}`
+                    : `Payment received for ${prefill.invoice_no}`)
+                : (prefillType === 'payable'
+                    ? (prefill.supplier_name ? `Payment made to ${prefill.supplier_name}` : '')
+                    : (prefill.customer_name ? `Payment received from ${prefill.customer_name}` : '')),
+            payment_details: [
+                {
+                    customer_id: prefillType === 'receivable' ? String(prefill.customer_id ?? '') : '',
+                    supplier_id: prefillType === 'payable' ? String(prefill.supplier_id ?? '') : '',
+                    paid_now: paidNow,
+                    remarks: prefill.invoice_no ? `Against ${prefill.invoice_no}` : '',
+                    auto_allocate: shouldAutoAllocate,
+                    allocations: !shouldAutoAllocate && prefill.order_id
+                        ? [{ order_id: String(prefill.order_id), amount: paidNow || '' }]
+                        : [],
+                },
+            ],
+        });
+
+        setEditingTransaction(undefined);
+        setEditingPayment(undefined);
+        setActiveTab('transactions');
+        setIsTransactionModalOpen(true);
+
+        navigate(location.pathname, { replace: true, state: null });
+    }, [location.state, location.pathname, navigate, accounts, currentUser?.name]);
     
     // Account Modals
     const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
@@ -534,8 +612,12 @@ export const AccountsPage = () => {
     const [viewingTransaction, setViewingTransaction] = useState<Transaction | undefined>(undefined);
     const [editingPayment, setEditingPayment] = useState<Payment | undefined>(undefined);
     const [viewingPayment, setViewingPayment] = useState<Payment | undefined>(undefined);
+    const [paymentPrefill, setPaymentPrefill] = useState<any | undefined>(undefined);
         const handleViewTransaction = async (item: Transaction) => {
-            if (item.type === 'Income' && item.reference_id) {
+            const isPaymentTx = (item.type === 'Income' || item.type === 'Expense')
+                && (item.category === 'Customer Receipts' || item.category === 'Supplier Payments');
+
+            if (isPaymentTx && item.reference_id) {
                 try {
                     const payment = await paymentApi.getBySerial(item.reference_id);
                     setViewingPayment(payment as any);
@@ -568,10 +650,14 @@ export const AccountsPage = () => {
     });
 
     const handleEditTransaction = async (item: Transaction) => {
+        setPaymentPrefill(undefined);
         setEditingTransaction(item);
         setEditingPayment(undefined);
 
-        if (item.type === 'Income' && item.reference_id) {
+        const isPaymentTx = (item.type === 'Income' || item.type === 'Expense')
+            && (item.category === 'Customer Receipts' || item.category === 'Supplier Payments');
+
+        if (isPaymentTx && item.reference_id) {
             try {
                 const payment = await paymentApi.getBySerial(item.reference_id);
                 setEditingPayment(payment as any);
@@ -689,19 +775,47 @@ export const AccountsPage = () => {
         }
     ];
 
+    const resolveTransactionCustomerName = (transaction: Transaction) => {
+        const directCustomer = customers.find(c => String(c.id) === String(transaction.contact_id || ''));
+        if (directCustomer?.name) return directCustomer.name;
+
+        const description = String(transaction.description || '').trim();
+        if (description) {
+            const fromMatch = description.match(/payment\s+received\s+from\s+(.+)/i);
+            if (fromMatch?.[1]) {
+                return fromMatch[1].trim();
+            }
+
+            const forMatch = description.match(/payment\s+received\s+for\s+(\d+)/i);
+            if (forMatch?.[1]) {
+                const byId = customers.find(c => String(c.id) === String(forMatch[1]));
+                if (byId?.name) return byId.name;
+            }
+        }
+
+        if (transaction.reference_id) {
+            const byReferenceId = customers.find(c => String(c.id) === String(transaction.reference_id));
+            if (byReferenceId?.name) return byReferenceId.name;
+        }
+
+        return '';
+    };
+
     const enrichedTransactions = filteredTransactions.map(t => {
-        const customer = customers.find(c => c.id === t.contact_id);
+        const customerName = resolveTransactionCustomerName(t);
         const acc = accounts.find(a => a.id === t.account_id);
         const toAcc = t.to_account_id ? accounts.find(a => a.id === t.to_account_id) : null;
         
         let details = t.description || '';
-        if (t.type === 'Income' && customer) details += ` ${customer.name}`;
+        if (customerName) details += ` ${customerName}`;
         if (t.category) details += ` ${t.category}`;
         if (t.type === 'Transfer') details += ' Transfer';
+        if (t.reference_id) details += ` ${t.reference_id}`;
 
         return {
             ...t,
             details_search: details,
+            customer_name: customerName,
             account_name: acc?.name || '',
             to_account_name: toAcc?.name || ''
         };
@@ -741,16 +855,26 @@ export const AccountsPage = () => {
             header: 'Details',
             accessorKey: 'details_search', // Searchable key
             cell: (item: Transaction) => {
-                const customer = customers.find(c => c.id === item.contact_id);
+                const transactionWithCustomer = item as Transaction & { customer_name?: string };
                 return (
                     <div>
                         <div className="font-medium text-gray-900">
-                            {item.type === 'Income' && customer ? customer.name : (item.category || 'Transfer')}
+                            {item.type === 'Income' && transactionWithCustomer.customer_name
+                                ? transactionWithCustomer.customer_name
+                                : (item.category || 'Transfer')}
                         </div>
                         <div className="text-xs text-gray-500">{item.description || '-'}</div>
                     </div>
                 )
             }
+        },
+        {
+            header: 'Customer',
+            accessorKey: 'customer_name',
+            sortable: true,
+            cell: (item: any) => (
+                <span className="text-xs">{item.customer_name || '-'}</span>
+            )
         },
         {
             header: 'Account',
@@ -807,6 +931,8 @@ export const AccountsPage = () => {
                                 type="date" 
                                 value={dateRange.start}
                                 onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                                title="Start date"
+                                aria-label="Start date"
                                 className="bg-transparent border-none text-sm focus:ring-0 p-0 text-gray-700 w-32"
                             />
                             <span className="text-gray-400">-</span>
@@ -814,6 +940,8 @@ export const AccountsPage = () => {
                                 type="date" 
                                 value={dateRange.end}
                                 onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                                title="End date"
+                                aria-label="End date"
                                 className="bg-transparent border-none text-sm focus:ring-0 p-0 text-gray-700 w-32"
                             />
                         </div>
@@ -840,6 +968,7 @@ export const AccountsPage = () => {
                                  setEditingAccount(undefined);
                                  setIsAccountModalOpen(true);
                              } else {
+                                 setPaymentPrefill(undefined);
                                  setEditingTransaction(undefined);
                                  setIsTransactionModalOpen(true);
                              }
@@ -935,6 +1064,7 @@ export const AccountsPage = () => {
                 onOpenChange={(open) => {
                     setIsTransactionModalOpen(open);
                     if (!open) {
+                        setPaymentPrefill(undefined);
                         setEditingTransaction(undefined);
                         setEditingPayment(undefined);
                     }
@@ -943,7 +1073,7 @@ export const AccountsPage = () => {
                 size="xl"
             >
                 <TransactionForm 
-                    initialData={editingPayment ? undefined : editingTransaction}
+                    initialData={editingPayment ? undefined : (paymentPrefill || editingTransaction)}
                     paymentData={editingPayment}
                     onSave={(data) => {
                         if (data?.kind === 'payment') {
@@ -957,6 +1087,7 @@ export const AccountsPage = () => {
                         } else {
                             addTransaction(data);
                         }
+                        setPaymentPrefill(undefined);
                         setIsTransactionModalOpen(false);
                     }} 
                     onCancel={() => setIsTransactionModalOpen(false)} 
@@ -977,7 +1108,7 @@ export const AccountsPage = () => {
                 onOpenChange={(open) => {
                     if (!open) setViewingPayment(undefined);
                 }}
-                title="Payment Receipt"
+                title="Payment Details"
                 size="full"
             >
                 {viewingPayment && (
@@ -986,6 +1117,7 @@ export const AccountsPage = () => {
                         tenant={tenant}
                         accounts={accounts}
                         customers={customers}
+                        suppliers={suppliers}
                         onClose={() => setViewingPayment(undefined)}
                     />
                 )}

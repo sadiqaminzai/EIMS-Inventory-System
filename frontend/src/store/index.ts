@@ -162,6 +162,22 @@ export interface SalesItem {
   exp_date?: string;
 }
 
+export interface SalePaymentAllocation {
+  id: string;
+  payment_id: string;
+  allocated_amount: number;
+  payment_serial?: string | null;
+  payment_date?: string | null;
+}
+
+export interface SaleInvoiceAdjustment {
+  id: string;
+  type: string;
+  amount: number;
+  reason?: string | null;
+  created_at?: string;
+}
+
 export interface Sale extends BaseEntity {
   id: string;
   invoice_no: string;
@@ -175,6 +191,10 @@ export interface Sale extends BaseEntity {
   total_tax: number;
   net_payable: number;
   paid_amount?: number;
+  due_amount?: number;
+  payment_status?: string;
+  payment_allocations?: SalePaymentAllocation[];
+  invoice_adjustments?: SaleInvoiceAdjustment[];
 }
 
 export interface ReturnItem {
@@ -229,6 +249,7 @@ export interface Transaction extends BaseEntity {
   id: string;
   date: string;
   type: 'Income' | 'Expense' | 'Transfer';
+  category_type?: 'expense' | 'other_income';
   category: string; // Used for Expense Category or Income Source
   amount: number;
   currency: 'USD' | 'AFN';
@@ -240,19 +261,28 @@ export interface Transaction extends BaseEntity {
   description?: string;
   payment_method: string;
   attachment?: string;
+  attachment_file?: File;
+  remove_attachment?: boolean;
 }
 
 export interface PaymentDetail {
-  customer_id: string;
+  customer_id?: string;
+  supplier_id?: string;
   debit_amount: number;
   credit_amount: number;
   balance_amount: number;
   remarks?: string;
+  allocations?: Array<{
+    order_id?: number;
+    sale_invoice_id?: number;
+    amount: number;
+  }>;
 }
 
 export interface Payment extends BaseEntity {
   id: string;
   serial_no?: string;
+  payment_type?: 'receivable' | 'payable';
   date: string;
   account_id: string;
   currency: string;
@@ -437,6 +467,56 @@ const resolveAssetUrl = (value?: string | null) => {
   return `${assetBase}/${value}`;
 };
 
+const appendFormDataValue = (formData: FormData, key: string, value: unknown) => {
+  if (value === undefined || value === null) {
+    return;
+  }
+
+  formData.append(key, String(value));
+};
+
+const buildAccountTransactionPayload = (data: Partial<Transaction>): Record<string, unknown> | FormData => {
+  const payload: Record<string, unknown> = {
+    date: data.date,
+    type: data.type,
+    category_type: data.category_type,
+    category: data.category,
+    amount: data.amount,
+    currency: data.currency,
+    exchange_rate: data.exchange_rate,
+    account_id: data.account_id ? Number(data.account_id) : undefined,
+    to_account_id: data.to_account_id ? Number(data.to_account_id) : undefined,
+    reference_id: data.reference_id,
+    contact_id: data.contact_id ? Number(data.contact_id) : undefined,
+    description: data.description,
+    payment_method: data.payment_method,
+    attachment: data.attachment,
+  };
+
+  const attachmentFile = (data as any).attachment_file;
+  const removeAttachment = Boolean((data as any).remove_attachment);
+
+  if (!(attachmentFile instanceof File) && !removeAttachment) {
+    return payload;
+  }
+
+  const formData = new FormData();
+
+  Object.entries(payload).forEach(([key, value]) => {
+    appendFormDataValue(formData, key, value);
+  });
+
+  if (attachmentFile instanceof File) {
+    formData.append('attachment_file', attachmentFile);
+  }
+
+  if (removeAttachment) {
+    formData.append('remove_attachment', '1');
+  }
+
+  return formData;
+};
+
 // --- Permissions Logic ---
 const INITIAL_PERMISSIONS_MAP: Record<string, Permission[]> = {};
 const DEFAULT_PERMISSIONS: Permission[] = [
@@ -472,6 +552,8 @@ const DEFAULT_PERMISSIONS: Permission[] = [
   'permission.view', 'permission.edit', 'permission.search', 'permission.export',
   'client.view', 'client.create', 'client.edit', 'client.delete', 'client.search', 'client.export', 'client.print',
 ];
+
+let bootstrapRequestCounter = 0;
 
 export const useStore = create<AppState>((set, get) => ({
   currentUser: INITIAL_USER,
@@ -547,6 +629,13 @@ export const useStore = create<AppState>((set, get) => ({
   },
   bootstrapData: async () => {
     try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) {
+        return;
+      }
+
+      const bootstrapRequestId = ++bootstrapRequestCounter;
+
       // Get current user's role to determine what to load
       const currentRole = get().currentUser.role?.toLowerCase();
       const isSuperAdmin = currentRole === 'superadmin';
@@ -612,16 +701,36 @@ export const useStore = create<AppState>((set, get) => ({
 
       const results = await Promise.allSettled(requests);
 
+      // Ignore stale responses from older bootstrap runs.
+      if (bootstrapRequestId !== bootstrapRequestCounter) {
+        return;
+      }
+
+      let fulfilledCount = 0;
+      const nonAuthFailures: string[] = [];
+
       results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          fulfilledCount += 1;
+          return;
+        }
+
         if (result.status === 'rejected') {
           const reason = result.reason;
-          // Don't show toast for 403 errors - permission denied is expected for some users
-          if (reason?.response?.status !== 403) {
+          // Don't show toast for expected auth/permission responses.
+          if (reason?.response?.status !== 401 && reason?.response?.status !== 403) {
             console.error(`Failed to load ${labels[index]}`, reason);
-            toast.error(`Failed to load ${labels[index]}`);
+            nonAuthFailures.push(labels[index]);
           }
         }
       });
+
+      // Avoid noisy per-endpoint toasts during background refreshes.
+      if (fulfilledCount === 0 && nonAuthFailures.length > 0) {
+        toast.error('Failed to load data');
+      } else if (nonAuthFailures.length > 0) {
+        console.warn('Some bootstrap endpoints failed', nonAuthFailures);
+      }
 
       const unwrap = <T>(index: number, fallback: T): T =>
         results[index]?.status === 'fulfilled' ? (results[index] as PromiseFulfilledResult<T>).value : fallback;
@@ -685,6 +794,36 @@ export const useStore = create<AppState>((set, get) => ({
       const toDateInput = (value?: string) => {
         if (!value) return '';
         return value.slice(0, 10);
+      };
+
+      const mapOrderReceivableFields = (order: any) => {
+        const netAmount = Number(order.net_amount ?? order.total_amount ?? 0);
+        const paidAmount = Number(order.paid_amount ?? 0);
+        const dueAmount = Number(order.due_amount ?? Math.max(netAmount - paidAmount, 0));
+        const rawStatus = String(order.payment_status ?? '').trim().toLowerCase();
+        const paymentStatus = rawStatus || (dueAmount <= 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'pending');
+
+        const paymentAllocations = Array.isArray(order.payment_allocations) ? order.payment_allocations : [];
+        const invoiceAdjustments = Array.isArray(order.invoice_adjustments) ? order.invoice_adjustments : [];
+
+        return {
+          due_amount: dueAmount,
+          payment_status: paymentStatus,
+          payment_allocations: paymentAllocations.map((allocation: any) => ({
+            id: String(allocation.id ?? ''),
+            payment_id: String(allocation.payment_id ?? ''),
+            allocated_amount: Number(allocation.allocated_amount ?? 0),
+            payment_serial: allocation.payment?.serial_no ?? null,
+            payment_date: allocation.payment?.date ?? null,
+          })),
+          invoice_adjustments: invoiceAdjustments.map((adjustment: any) => ({
+            id: String(adjustment.id ?? ''),
+            type: String(adjustment.type ?? ''),
+            amount: Number(adjustment.amount ?? 0),
+            reason: adjustment.reason ?? null,
+            created_at: adjustment.created_at,
+          })),
+        };
       };
 
       const roleList: RoleItem[] = (_roles ?? []).map((r: any) => ({
@@ -859,6 +998,7 @@ export const useStore = create<AppState>((set, get) => ({
           id: String(t.id),
           date: t.date,
           type: t.type as any,
+          category_type: (t.category_type ?? undefined) as any,
           category: t.category ?? '',
           amount: Number(t.amount ?? 0),
           currency: (t.currency ?? 'USD') as any,
@@ -869,7 +1009,7 @@ export const useStore = create<AppState>((set, get) => ({
           contact_id: t.contact_id ? String(t.contact_id) : undefined,
           description: t.description ?? undefined,
           payment_method: t.payment_method ?? '',
-          attachment: t.attachment ?? undefined,
+          attachment: resolveAssetUrl(t.attachment) ?? undefined,
           created_by: resolveUser((t as any).created_by),
           updated_by: resolveUser((t as any).updated_by),
         })),
@@ -930,6 +1070,7 @@ export const useStore = create<AppState>((set, get) => ({
           total_tax: Number(o.total_tax ?? 0),
           net_payable: Number(o.net_amount ?? o.total_amount ?? 0),
           paid_amount: Number(o.paid_amount ?? 0),
+          ...mapOrderReceivableFields(o),
           created_by: resolveUser(o.created_by),
           updated_by: resolveUser(o.updated_by),
           created_at: o.created_at,
@@ -961,6 +1102,7 @@ export const useStore = create<AppState>((set, get) => ({
             total_tax: Number(o.total_tax ?? 0),
             net_payable: Number(o.net_amount ?? o.total_amount ?? 0),
             paid_amount: Number(o.paid_amount ?? 0),
+            ...mapOrderReceivableFields(o),
             created_by: resolveUser(o.created_by),
             updated_by: resolveUser(o.updated_by),
             created_at: o.created_at,
@@ -992,6 +1134,7 @@ export const useStore = create<AppState>((set, get) => ({
             total_tax: Number(o.total_tax ?? 0),
             net_payable: Number(o.net_amount ?? o.total_amount ?? 0),
             paid_amount: Number(o.paid_amount ?? 0),
+            ...mapOrderReceivableFields(o),
             created_by: resolveUser(o.created_by),
             updated_by: resolveUser(o.updated_by),
             created_at: o.created_at,
@@ -1023,6 +1166,7 @@ export const useStore = create<AppState>((set, get) => ({
             total_tax: Number(o.total_tax ?? 0),
             net_payable: Number(o.net_amount ?? o.total_amount ?? 0),
             paid_amount: Number(o.paid_amount ?? 0),
+            ...mapOrderReceivableFields(o),
             created_by: resolveUser(o.created_by),
             updated_by: resolveUser(o.updated_by),
             created_at: o.created_at,
@@ -1054,6 +1198,7 @@ export const useStore = create<AppState>((set, get) => ({
             total_tax: Number(o.total_tax ?? 0),
             net_payable: Number(o.net_amount ?? o.total_amount ?? 0),
             paid_amount: Number(o.paid_amount ?? 0),
+            ...mapOrderReceivableFields(o),
             created_by: resolveUser(o.created_by),
             updated_by: resolveUser(o.updated_by),
             created_at: o.created_at,
@@ -1957,21 +2102,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   addTransaction: async (data) => {
     try {
-      const created = await accountTransactionApi.create({
-        date: data.date,
-        type: data.type,
-        category: data.category,
-        amount: data.amount,
-        currency: data.currency,
-        exchange_rate: data.exchange_rate,
-        account_id: Number(data.account_id),
-        to_account_id: data.to_account_id ? Number(data.to_account_id) : undefined,
-        reference_id: data.reference_id,
-        contact_id: data.contact_id ? Number(data.contact_id) : undefined,
-        description: data.description,
-        payment_method: data.payment_method,
-        attachment: data.attachment,
-      });
+      const created = await accountTransactionApi.create(buildAccountTransactionPayload(data));
       toast.success('Transaction added successfully');
       set((state) => ({ transactions: [...state.transactions, {
         ...data,
@@ -1986,6 +2117,7 @@ export const useStore = create<AppState>((set, get) => ({
   addPayment: async (data) => {
     try {
       await paymentApi.create({
+        payment_type: data.payment_type ?? 'receivable',
         date: data.date,
         account_id: Number(data.account_id),
         currency: data.currency,
@@ -1993,11 +2125,21 @@ export const useStore = create<AppState>((set, get) => ({
         booker: data.booker,
         notes: data.notes,
         details: data.details.map((d) => ({
-          customer_id: Number(d.customer_id),
+          ...(d.customer_id ? { customer_id: Number(d.customer_id) } : {}),
+          ...(d.supplier_id ? { supplier_id: Number(d.supplier_id) } : {}),
           debit_amount: d.debit_amount,
           credit_amount: d.credit_amount,
           balance_amount: d.balance_amount,
           remarks: d.remarks,
+          allocations: Array.isArray(d.allocations)
+            ? d.allocations
+                .filter((allocation: any) => Number(allocation?.amount || 0) > 0)
+                .map((allocation: any) => ({
+                  order_id: allocation.order_id ? Number(allocation.order_id) : undefined,
+                  sale_invoice_id: allocation.sale_invoice_id ? Number(allocation.sale_invoice_id) : undefined,
+                  amount: Number(allocation.amount),
+                }))
+            : undefined,
         })),
       } as any);
       toast.success('Payment recorded successfully');
@@ -2010,6 +2152,7 @@ export const useStore = create<AppState>((set, get) => ({
   updatePayment: async (id, data) => {
     try {
       await paymentApi.update(id, {
+        payment_type: data.payment_type ?? 'receivable',
         date: data.date,
         account_id: Number(data.account_id),
         currency: data.currency,
@@ -2017,11 +2160,21 @@ export const useStore = create<AppState>((set, get) => ({
         booker: data.booker,
         notes: data.notes,
         details: data.details.map((d) => ({
-          customer_id: Number(d.customer_id),
+          ...(d.customer_id ? { customer_id: Number(d.customer_id) } : {}),
+          ...(d.supplier_id ? { supplier_id: Number(d.supplier_id) } : {}),
           debit_amount: d.debit_amount,
           credit_amount: d.credit_amount,
           balance_amount: d.balance_amount,
           remarks: d.remarks,
+          allocations: Array.isArray(d.allocations)
+            ? d.allocations
+                .filter((allocation: any) => Number(allocation?.amount || 0) > 0)
+                .map((allocation: any) => ({
+                  order_id: allocation.order_id ? Number(allocation.order_id) : undefined,
+                  sale_invoice_id: allocation.sale_invoice_id ? Number(allocation.sale_invoice_id) : undefined,
+                  amount: Number(allocation.amount),
+                }))
+            : undefined,
         })),
       } as any);
       toast.info('Payment updated successfully');
@@ -2033,21 +2186,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   updateTransaction: async (id, data) => {
     try {
-      await accountTransactionApi.update(id, {
-        date: data.date,
-        type: data.type,
-        category: data.category,
-        amount: data.amount,
-        currency: data.currency,
-        exchange_rate: data.exchange_rate,
-        account_id: Number(data.account_id),
-        to_account_id: data.to_account_id ? Number(data.to_account_id) : undefined,
-        reference_id: data.reference_id,
-        contact_id: data.contact_id ? Number(data.contact_id) : undefined,
-        description: data.description,
-        payment_method: data.payment_method,
-        attachment: data.attachment,
-      });
+      await accountTransactionApi.update(id, buildAccountTransactionPayload(data));
       toast.info('Transaction updated successfully');
       await get().bootstrapData();
     } catch {

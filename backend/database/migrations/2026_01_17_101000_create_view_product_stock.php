@@ -7,6 +7,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
         DB::statement('DROP VIEW IF EXISTS view_product_stock');
         DB::statement(<<<SQL
             CREATE VIEW view_product_stock AS
@@ -23,6 +27,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
         DB::statement('DROP VIEW IF EXISTS view_product_stock');
     }
 };

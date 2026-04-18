@@ -38,10 +38,16 @@ export const LoginPage = () => {
 
       toast.success(`Welcome back, ${response.user.name}!`);
       navigate('/dashboard');
-    } catch (error) {
+    } catch (error: any) {
       localStorage.removeItem('auth_token');
       localStorage.removeItem('tenant_id');
-      toast.error('Invalid email or password.');
+      const status = error?.response?.status;
+      const backendMessage = error?.response?.data?.message;
+      if (status === 401) {
+        toast.error('Invalid email or password.');
+      } else {
+        toast.error(backendMessage || 'Login failed. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }

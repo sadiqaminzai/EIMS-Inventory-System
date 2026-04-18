@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Models\InvoiceAdjustment;
 use App\Models\InventoryBatch;
 use App\Models\InventoryLog;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\PaymentAllocation;
 use App\Models\Product;
 use App\Models\Supplier;
 use Illuminate\Http\Request;
@@ -198,7 +200,11 @@ class TransactionController extends Controller
                     ]);
                 }
 
-                $totals = $this->calculateTotals($data['items'], (float) ($data['paid_amount'] ?? 0));
+                $totals = $this->calculatePurchaseTotalsForOrder(
+                    $order,
+                    $data['items'],
+                    isset($data['paid_amount']) ? (float) $data['paid_amount'] : null
+                );
                 $order->update(array_merge($totals, [
                     'party_id' => $supplier->id,
                     'party_type' => Supplier::class,
@@ -464,7 +470,11 @@ class TransactionController extends Controller
                 $total += $orderItem->total_price;
             }
 
-            $totals = $this->calculateTotals($data['items'], (float) ($data['paid_amount'] ?? 0));
+            $totals = $this->calculateSaleTotalsForOrder(
+                $order,
+                $data['items'],
+                isset($data['paid_amount']) ? (float) $data['paid_amount'] : null
+            );
             $order->update(array_merge($totals, ['updated_by' => $request->user()->id]));
 
             return $order;
@@ -1011,7 +1021,17 @@ class TransactionController extends Controller
 
     public function history(Request $request)
     {
-        $query = Order::query()->with('items');
+        $query = Order::query()->with([
+            'items',
+            'paymentAllocations' => function ($allocationQuery) {
+                $allocationQuery
+                    ->orderBy('id')
+                    ->with(['payment:id,serial_no,date']);
+            },
+            'invoiceAdjustments' => function ($adjustmentQuery) {
+                $adjustmentQuery->orderBy('id');
+            },
+        ]);
 
         if ($request->filled('type')) {
             $query->where('transaction_type', $request->input('type'));
@@ -1056,7 +1076,7 @@ class TransactionController extends Controller
         }
 
         $netAmount = $totalAmount - $totalDiscount + $totalTax;
-        $dueAmount = $netAmount - $paidAmount;
+        $dueAmount = max($netAmount - $paidAmount, 0);
 
         return [
             'total_amount' => $totalAmount,
@@ -1065,7 +1085,69 @@ class TransactionController extends Controller
             'net_amount' => $netAmount,
             'paid_amount' => $paidAmount,
             'due_amount' => $dueAmount,
+            'payment_status' => $this->resolvePaymentStatus($paidAmount, $dueAmount),
         ];
+    }
+
+    protected function calculateSaleTotalsForOrder(Order $order, array $items, ?float $requestedPaidAmount = null): array
+    {
+        $totals = $this->calculateTotals($items, 0);
+
+        $allocatedPaidAmount = (float) PaymentAllocation::query()
+            ->where('order_id', $order->id)
+            ->sum('allocated_amount');
+
+        $hasLinkedAllocations = $allocatedPaidAmount > 0;
+        $paidAmount = $hasLinkedAllocations
+            ? $allocatedPaidAmount
+            : max((float) ($requestedPaidAmount ?? $order->paid_amount ?? 0), 0);
+
+        $adjustmentTotal = (float) InvoiceAdjustment::query()
+            ->where('order_id', $order->id)
+            ->sum('amount');
+
+        $dueAmount = max((float) ($totals['net_amount'] ?? 0) - $paidAmount - $adjustmentTotal, 0);
+
+        return array_merge($totals, [
+            'paid_amount' => $paidAmount,
+            'due_amount' => $dueAmount,
+            'payment_status' => $this->resolvePaymentStatus($paidAmount, $dueAmount),
+        ]);
+    }
+
+    protected function calculatePurchaseTotalsForOrder(Order $order, array $items, ?float $requestedPaidAmount = null): array
+    {
+        $totals = $this->calculateTotals($items, 0);
+
+        $allocatedPaidAmount = (float) PaymentAllocation::query()
+            ->where('order_id', $order->id)
+            ->sum('allocated_amount');
+
+        $hasLinkedAllocations = $allocatedPaidAmount > 0;
+        $paidAmount = $hasLinkedAllocations
+            ? $allocatedPaidAmount
+            : max((float) ($requestedPaidAmount ?? $order->paid_amount ?? 0), 0);
+
+        $dueAmount = max((float) ($totals['net_amount'] ?? 0) - $paidAmount, 0);
+
+        return array_merge($totals, [
+            'paid_amount' => $paidAmount,
+            'due_amount' => $dueAmount,
+            'payment_status' => $this->resolvePaymentStatus($paidAmount, $dueAmount),
+        ]);
+    }
+
+    protected function resolvePaymentStatus(float $paidAmount, float $dueAmount): string
+    {
+        if ($dueAmount <= 0) {
+            return 'paid';
+        }
+
+        if ($paidAmount > 0) {
+            return 'partial';
+        }
+
+        return 'pending';
     }
 
     protected function upsertInventoryBatch(Product $product, array $item, string $date, Request $request, int $qtyWithBonus, ?int $supplierId = null): InventoryBatch
@@ -1176,7 +1258,11 @@ class TransactionController extends Controller
             $total += $totalPrice;
         }
 
-        $totals = $this->calculateTotals($data['items'], (float) ($data['paid_amount'] ?? 0));
+        $totals = $this->calculatePurchaseTotalsForOrder(
+            $order,
+            $data['items'],
+            isset($data['paid_amount']) ? (float) $data['paid_amount'] : null
+        );
 
         $order->update(array_merge($totals, [
             'updated_by' => $request->user()->id,

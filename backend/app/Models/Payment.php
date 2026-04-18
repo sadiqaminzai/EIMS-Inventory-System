@@ -15,6 +15,7 @@ class Payment extends Model
         'account_id',
         'serial_no',
         'date',
+        'payment_type',
         'salesman',
         'booker',
         'total_pending_before',
@@ -28,6 +29,9 @@ class Payment extends Model
 
     protected $casts = [
         'date' => 'date',
+        'total_pending_before' => 'decimal:2',
+        'total_received' => 'decimal:2',
+        'total_pending_after' => 'decimal:2',
     ];
 
     public function details()
@@ -38,5 +42,10 @@ class Payment extends Model
     public function account()
     {
         return $this->belongsTo(Account::class);
+    }
+
+    public function allocations()
+    {
+        return $this->hasMany(PaymentAllocation::class);
     }
 }

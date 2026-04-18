@@ -6,32 +6,26 @@ use App\Models\Concerns\HasTenant;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-class AccountTransaction extends Model
+class InvoiceAdjustment extends Model
 {
     use HasFactory, HasTenant;
 
     protected $fillable = [
         'tenant_id',
-        'serial_no',
-        'account_id',
-        'to_account_id',
+        'order_id',
         'type',
-        'category_type',
-        'category',
         'amount',
-        'currency',
-        'exchange_rate',
-        'contact_id',
-        'payment_method',
-        'reference_id',
-        'description',
-        'attachment',
-        'date',
+        'reason',
         'created_by',
         'updated_by',
     ];
 
     protected $casts = [
-        'date' => 'date',
+        'amount' => 'decimal:2',
     ];
+
+    public function order()
+    {
+        return $this->belongsTo(Order::class);
+    }
 }

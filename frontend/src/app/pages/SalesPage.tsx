@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import styles from './SalesPage.module.css';
 import { useForm, useFieldArray, useWatch, Controller, useFormContext } from 'react-hook-form';
 import { useStore, Sale } from '../../store';
@@ -66,6 +66,15 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
     }
   };
   const invoiceType = (watch('invoice_type') || 'sale') as 'sale' | 'purchase' | 'return_in' | 'return_out' | 'quotation';
+  const toSafeNumber = (value: unknown) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const subTotal = toSafeNumber(watch('sub_total'));
+  const totalDiscount = toSafeNumber(watch('total_discount'));
+  const totalTax = toSafeNumber(watch('total_tax'));
+  const netPayable = toSafeNumber(watch('net_payable'));
+  const paidAmount = toSafeNumber(watch('paid_amount'));
   const [batchCache, setBatchCache] = useState<Record<number, InventoryBatch[]>>({});
   const [focusedProductId, setFocusedProductId] = useState<string>('');
 
@@ -157,13 +166,36 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
     return lineTotal - itemDiscount + itemTax;
   };
 
+  const totalsRecalcTrigger = useMemo(
+    () =>
+      (items || [])
+        .map((item: any) => [item?.quantity ?? '', item?.sale_price ?? '', item?.discount_percent ?? '', item?.tax_percent ?? ''].join(':'))
+        .join('|'),
+    [items]
+  );
+
   // Auto-calculate totals with dynamic updates
   useEffect(() => {
+    const currentItems = (getValues('items') || []) as any[];
+
+    const setNumericIfChanged = (path: string, nextValue: number) => {
+      const currentValue = Number(getValues(path as any) || 0);
+      if (Math.abs(currentValue - nextValue) < 0.0001) {
+        return;
+      }
+
+      setValue(path as any, nextValue, {
+        shouldDirty: false,
+        shouldTouch: false,
+        shouldValidate: false,
+      });
+    };
+
     let sub = 0;
     let disc = 0;
     let tax = 0;
 
-    items.forEach((item, index) => {
+    currentItems.forEach((item, index) => {
       // Only calculate if we have valid numeric data
       const quantity = Number(item.quantity) || 0;
       const salePrice = Number(item.sale_price) || 0;
@@ -176,27 +208,29 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
         const itemTax = ((lineTotal - itemDiscount) * taxPercent) / 100;
         const amount = lineTotal - itemDiscount + itemTax;
 
-        // Always update calculations to ensure consistency
-        setValue(`items.${index}.amount`, Number(amount.toFixed(2)));
-        setValue(`items.${index}.discount`, Number(itemDiscount.toFixed(2)));
-        setValue(`items.${index}.tax`, Number(itemTax.toFixed(2)));
+        const roundedAmount = Number(amount.toFixed(2));
+        const roundedDiscount = Number(itemDiscount.toFixed(2));
+        const roundedTax = Number(itemTax.toFixed(2));
+
+        setNumericIfChanged(`items.${index}.amount`, roundedAmount);
+        setNumericIfChanged(`items.${index}.discount`, roundedDiscount);
+        setNumericIfChanged(`items.${index}.tax`, roundedTax);
         
         sub += lineTotal;
         disc += itemDiscount;
         tax += itemTax;
       } else {
-        // Clear amounts when quantity or price is 0
-        setValue(`items.${index}.amount`, 0);
-        setValue(`items.${index}.discount`, 0);
-        setValue(`items.${index}.tax`, 0);
+        setNumericIfChanged(`items.${index}.amount`, 0);
+        setNumericIfChanged(`items.${index}.discount`, 0);
+        setNumericIfChanged(`items.${index}.tax`, 0);
       }
     });
 
-    setValue('sub_total', Number(sub.toFixed(2)));
-    setValue('total_discount', Number(disc.toFixed(2)));
-    setValue('total_tax', Number(tax.toFixed(2)));
-    setValue('net_payable', Number((sub - disc + tax).toFixed(2)));
-  }, [items, setValue]);
+    setNumericIfChanged('sub_total', Number(sub.toFixed(2)));
+    setNumericIfChanged('total_discount', Number(disc.toFixed(2)));
+    setNumericIfChanged('total_tax', Number(tax.toFixed(2)));
+    setNumericIfChanged('net_payable', Number((sub - disc + tax).toFixed(2)));
+  }, [totalsRecalcTrigger, getValues, setValue]);
 
   // Add new row and focus on product field
   const addNewItem = () => {
@@ -717,19 +751,19 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
           )}
           <div className="absolute left-80 top-1/2 -translate-y-1/2 flex items-center gap-1">
             <span className="text-gray-500">Sub Total:</span>
-            <span className="font-bold text-gray-900">{watch('sub_total').toFixed(2)}</span>
+            <span className="font-bold text-gray-900">{subTotal.toFixed(2)}</span>
           </div>
           <div className="absolute left-[470px] top-1/2 -translate-y-1/2 flex items-center gap-1">
             <span className="text-gray-500">Discount:</span>
-            <span className="font-bold text-red-600">-{watch('total_discount').toFixed(2)}</span>
+            <span className="font-bold text-red-600">-{totalDiscount.toFixed(2)}</span>
           </div>
           <div className="absolute left-[620px] top-1/2 -translate-y-1/2 flex items-center gap-1">
             <span className="text-gray-500">Tax:</span>
-            <span className="font-bold text-blue-600">+{watch('total_tax').toFixed(2)}</span>
+            <span className="font-bold text-blue-600">+{totalTax.toFixed(2)}</span>
           </div>
           <div className="absolute left-[740px] top-1/2 -translate-y-1/2 flex items-center gap-1">
             <span className="text-gray-500">Net Total:</span>
-            <span className="font-bold text-purple-600">{watch('net_payable').toFixed(2)}</span>
+            <span className="font-bold text-purple-600">{netPayable.toFixed(2)}</span>
           </div>
           <div className="absolute left-[880px] top-1/2 -translate-y-1/2 flex items-center gap-1">
             <span className="text-gray-500">Paid:</span>
@@ -742,7 +776,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
           </div>
           <div className="absolute left-[1020px] top-1/2 -translate-y-1/2 flex items-center gap-1">
             <span className="text-gray-500">Due:</span>
-            <span className="font-bold text-orange-600">{(watch('net_payable') - (watch('paid_amount') || 0)).toFixed(2)}</span>
+            <span className="font-bold text-orange-600">{(netPayable - paidAmount).toFixed(2)}</span>
           </div>
         </div>
       </div>
@@ -837,6 +871,38 @@ export const SalesPage = () => {
     type === 'return_in' ? 'S. Return' :
     type === 'return_out' ? 'P. Return' : 'Quotation';
 
+  const formatMoney = (value: number) => Number(value || 0).toFixed(2);
+
+  const getInvoiceDue = (sale: Sale) => {
+    if (sale.due_amount !== undefined && sale.due_amount !== null) {
+      return Number(sale.due_amount || 0);
+    }
+
+    return Math.max(Number(sale.net_payable || 0) - Number(sale.paid_amount || 0), 0);
+  };
+
+  const getInvoiceStatus = (sale: Sale) => {
+    const rawStatus = String(sale.payment_status || '').trim().toLowerCase();
+    if (rawStatus) return rawStatus;
+
+    const due = getInvoiceDue(sale);
+    if (due <= 0) return 'paid';
+    if (Number(sale.paid_amount || 0) > 0) return 'partial';
+    return 'pending';
+  };
+
+  const getAllocatedTotal = (sale: Sale) =>
+    (sale.payment_allocations || []).reduce((sum, allocation) => sum + Number(allocation.allocated_amount || 0), 0);
+
+  const getAdjustmentTotal = (sale: Sale) =>
+    (sale.invoice_adjustments || []).reduce((sum, adjustment) => sum + Number(adjustment.amount || 0), 0);
+
+  const statusBadgeClass = (status: string) => {
+    if (status === 'paid') return 'bg-green-100 text-green-700 border-green-200';
+    if (status === 'partial') return 'bg-amber-100 text-amber-700 border-amber-200';
+    return 'bg-red-100 text-red-700 border-red-200';
+  };
+
   const permPrefixForInvoice = (sale: Sale) => {
     const invoiceType = resolveInvoiceType(sale);
     if (invoiceType === 'purchase') return 'purchase';
@@ -853,13 +919,63 @@ export const SalesPage = () => {
     return typeFilter === 'all' ? true : invoiceType === typeFilter;
   });
 
+  const viewSaleAllocations = viewSale?.payment_allocations || [];
+  const viewSaleAdjustments = viewSale?.invoice_adjustments || [];
+  const viewSaleDue = viewSale ? getInvoiceDue(viewSale) : 0;
+  const viewSaleStatus = viewSale ? getInvoiceStatus(viewSale) : 'pending';
+  const viewSaleAllocated = viewSale ? getAllocatedTotal(viewSale) : 0;
+  const viewSaleAdjustmentTotal = viewSale ? getAdjustmentTotal(viewSale) : 0;
+
   const columns = [
     { header: 'S.NO', accessorKey: 'invoice_no' as keyof Sale, sortable: true },
     { header: 'Type', accessorKey: 'invoice_type' as keyof Sale, sortable: true, cell: (i: Sale) => typeLabel(resolveInvoiceType(i)) },
     { header: 'Party', accessorKey: 'party_name', sortable: true, cell: (i: any) => i.party_name || '-' },
-    { header: 'Total', accessorKey: 'net_payable', sortable: true, cell: (i: Sale) => i.net_payable.toFixed(2) },
-    { header: 'Paid', accessorKey: 'paid_amount', sortable: true, cell: (i: Sale) => (i.paid_amount || 0).toFixed(2) },
-    { header: 'Remaining', cell: (i: Sale) => (i.net_payable - (i.paid_amount || 0)).toFixed(2) },
+    { header: 'Total', accessorKey: 'net_payable', sortable: true, cell: (i: Sale) => formatMoney(i.net_payable) },
+    { header: 'Paid', accessorKey: 'paid_amount', sortable: true, cell: (i: Sale) => formatMoney(i.paid_amount || 0) },
+    { header: 'Due', accessorKey: 'due_amount' as keyof Sale, sortable: true, cell: (i: Sale) => formatMoney(getInvoiceDue(i)) },
+    {
+      header: 'Status',
+      accessorKey: 'payment_status' as keyof Sale,
+      sortable: true,
+      cell: (i: Sale) => {
+        const status = getInvoiceStatus(i);
+        return (
+          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize ${statusBadgeClass(status)}`}>
+            {status}
+          </span>
+        );
+      },
+    },
+    {
+      header: 'Linked Payments',
+      cell: (i: Sale) => {
+        const allocationCount = i.payment_allocations?.length || 0;
+        if (allocationCount === 0) {
+          return <span className="text-gray-400">-</span>;
+        }
+
+        return (
+          <span className="text-xs font-medium text-blue-700">
+            {allocationCount} ({formatMoney(getAllocatedTotal(i))})
+          </span>
+        );
+      },
+    },
+    {
+      header: 'Adjustments',
+      cell: (i: Sale) => {
+        const adjustmentCount = i.invoice_adjustments?.length || 0;
+        if (adjustmentCount === 0) {
+          return <span className="text-gray-400">-</span>;
+        }
+
+        return (
+          <span className="text-xs font-medium text-indigo-700">
+            {adjustmentCount} ({formatMoney(getAdjustmentTotal(i))})
+          </span>
+        );
+      },
+    },
     { header: 'Inv Date', accessorKey: 'sale_date' as keyof Sale, sortable: true },
     { 
       header: 'Actions', 
@@ -955,9 +1071,73 @@ export const SalesPage = () => {
       <Modal open={!!viewSale} onOpenChange={(o) => !o && setViewSale(null)} title="Invoice Details" size="full">
         {viewSale && (
             <div className="flex flex-col h-full bg-gray-100">
-                 <div className="flex-1 overflow-auto flex justify-center p-0">
-                    <div className="bg-white shadow-lg h-fit scale-[0.9] origin-top my-4 print:hidden">
-                        <InvoiceTemplate data={viewSale} type={resolveInvoiceType(viewSale) as any} />
+                 <div className="flex-1 overflow-auto p-4">
+                    <div className="mx-auto max-w-[980px] space-y-4">
+                      <div className="bg-white shadow-lg h-fit scale-[0.9] origin-top print:hidden">
+                          <InvoiceTemplate data={viewSale} type={resolveInvoiceType(viewSale) as any} />
+                      </div>
+
+                      <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                        <h3 className="mb-3 text-sm font-semibold text-gray-900">Payment Linkage</h3>
+                        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                          <div className="rounded-md border border-gray-200 bg-gray-50 p-2">
+                            <div className="text-[11px] uppercase text-gray-500">Paid</div>
+                            <div className="mt-1 text-sm font-semibold text-green-700">{formatMoney(viewSale.paid_amount || 0)}</div>
+                          </div>
+                          <div className="rounded-md border border-red-200 bg-red-50 p-2">
+                            <div className="text-[11px] uppercase text-red-600">Due</div>
+                            <div className="mt-1 text-sm font-semibold text-red-700">{formatMoney(viewSaleDue)}</div>
+                          </div>
+                          <div className="rounded-md border border-blue-200 bg-blue-50 p-2">
+                            <div className="text-[11px] uppercase text-blue-600">Allocated</div>
+                            <div className="mt-1 text-sm font-semibold text-blue-700">{formatMoney(viewSaleAllocated)}</div>
+                          </div>
+                          <div className="rounded-md border border-indigo-200 bg-indigo-50 p-2">
+                            <div className="text-[11px] uppercase text-indigo-600">Adjustments</div>
+                            <div className="mt-1 text-sm font-semibold text-indigo-700">{formatMoney(viewSaleAdjustmentTotal)}</div>
+                          </div>
+                        </div>
+
+                        <div className="mt-3">
+                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize ${statusBadgeClass(viewSaleStatus)}`}>
+                            Status: {viewSaleStatus}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-600">Linked Payments</h4>
+                          {viewSaleAllocations.length === 0 && <div className="text-xs text-gray-400">No linked payment allocation found.</div>}
+                          {viewSaleAllocations.length > 0 && (
+                            <div className="space-y-2">
+                              {viewSaleAllocations.map((allocation) => (
+                                <div key={allocation.id} className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                                  <div className="font-medium">{allocation.payment_serial || `Payment #${allocation.payment_id}`}</div>
+                                  <div>Allocated: {formatMoney(allocation.allocated_amount)}</div>
+                                  <div>Date: {allocation.payment_date || '-'}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-600">Invoice Adjustments</h4>
+                          {viewSaleAdjustments.length === 0 && <div className="text-xs text-gray-400">No adjustments applied.</div>}
+                          {viewSaleAdjustments.length > 0 && (
+                            <div className="space-y-2">
+                              {viewSaleAdjustments.map((adjustment) => (
+                                <div key={adjustment.id} className="rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
+                                  <div className="font-medium capitalize">{adjustment.type || 'Adjustment'}</div>
+                                  <div>Amount: {formatMoney(adjustment.amount)}</div>
+                                  <div>Reason: {adjustment.reason || '-'}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                  </div>
                  <div className="flex items-center justify-between p-4 border-t border-gray-200 bg-white gap-4 shrink-0 z-10 print:hidden">

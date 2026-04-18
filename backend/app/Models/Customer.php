@@ -22,4 +22,21 @@ class Customer extends Model
         'created_by',
         'updated_by',
     ];
+
+    public function saleOrders()
+    {
+        return $this->hasMany(Order::class, 'party_id')
+            ->where('party_type', self::class)
+            ->where('transaction_type', 'sale');
+    }
+
+    public function paymentDetails()
+    {
+        return $this->hasMany(PaymentDetail::class);
+    }
+
+    public function paymentAllocations()
+    {
+        return $this->hasMany(PaymentAllocation::class);
+    }
 }

@@ -9,6 +9,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
         $hasRef = Schema::hasColumn('orders', 'reference_number');
         $hasSerial = Schema::hasColumn('orders', 'serial_no');
 
@@ -41,6 +45,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
         if (! Schema::hasColumn('orders', 'reference_number')) {
             Schema::table('orders', function (Blueprint $table) {
                 $table->string('reference_number')->nullable()->after('serial_no');

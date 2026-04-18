@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router';
 import { useForm, useFieldArray, useWatch, Controller } from 'react-hook-form';
 import { useStore, Purchase, PurchaseItem } from '../../store';
 import { Modal } from '../components/ui/Modal';
@@ -6,7 +7,7 @@ import { DenseInput, DenseSelect } from '../components/ui/Form';
 import { SearchableSelect } from '../components/ui/SearchableSelect';
 import { DenseTable } from '../components/ui/DenseTable';
 import { ActionButtons } from '../components/ui/ActionButtons';
-import { Trash2, Plus, Printer, Save, X } from 'lucide-react';
+import { Trash2, Plus, Printer, Save, X, Wallet } from 'lucide-react';
 import { format } from 'date-fns';
 import { formatDateTime } from '../utils/dateTime';
 import { InvoiceTemplate } from '../components/print/InvoiceTemplate';
@@ -269,10 +270,12 @@ const PurchaseForm = ({ initialData, onSave, onCancel }: { initialData?: Purchas
 
 export const PurchasesPage = () => {
   const { purchases, suppliers, products, tenant, printSettings, addPurchase, updatePurchase, deletePurchase, hasPermission } = useStore();
+  const navigate = useNavigate();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<Purchase | undefined>(undefined);
   const [viewPurchase, setViewPurchase] = useState<Purchase | null>(null);
   const [printData, setPrintData] = useState<Purchase | null>(null);
+  const canStartPayment = hasPermission('account.transactions.create') || hasPermission('account.transaction.payment');
 
   const handleSave = (data: any) => {
     if (editingPurchase) {
@@ -305,6 +308,27 @@ export const PurchasesPage = () => {
   const handleDownload = async (purchase: Purchase) => {
     const supplier = suppliers.find(s => s.id === purchase.supplier_id);
     await generateInvoicePDF('Purchase', purchase, tenant, products, supplier, printSettings);
+  };
+
+  const openPayableForPurchase = (purchase: Purchase) => {
+    const dueAmount = Number((purchase.grand_total || 0) - (purchase.paid_amount || 0));
+    if (dueAmount <= 0) return;
+
+    const supplier = suppliers.find((s) => s.id === purchase.supplier_id);
+
+    navigate('/accounts', {
+      state: {
+        openPaymentWith: {
+          payment_type: 'payable',
+          supplier_id: Number(purchase.supplier_id),
+          supplier_name: supplier?.name,
+          order_id: Number(purchase.id),
+          invoice_no: purchase.invoice_no,
+          due_amount: dueAmount,
+          auto_allocate: false,
+        },
+      },
+    });
   };
 
   const enrichedPurchases = purchases.map(p => ({
@@ -343,6 +367,22 @@ export const PurchasesPage = () => {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Print Invoice</TooltipContent>
+            </Tooltip>
+          )}
+          {canStartPayment && Number(i.grand_total - (i.paid_amount || 0)) > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => openPayableForPurchase(i)}
+                  className="h-8 w-8 text-emerald-700 hover:bg-emerald-100"
+                  title="Pay Invoice"
+                >
+                  <Wallet className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Pay Pending</TooltipContent>
             </Tooltip>
           )}
         </div>

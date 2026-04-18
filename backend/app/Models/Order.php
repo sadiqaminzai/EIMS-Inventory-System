@@ -24,6 +24,7 @@ class Order extends Model
         'net_amount',
         'paid_amount',
         'due_amount',
+        'payment_status',
         'notes',
         'transaction_date',
         'created_by',
@@ -32,6 +33,12 @@ class Order extends Model
 
     protected $casts = [
         'transaction_date' => 'datetime',
+        'total_amount' => 'decimal:2',
+        'total_discount' => 'decimal:2',
+        'total_tax' => 'decimal:2',
+        'net_amount' => 'decimal:2',
+        'paid_amount' => 'decimal:2',
+        'due_amount' => 'decimal:2',
     ];
 
     public function items()
@@ -47,5 +54,15 @@ class Order extends Model
     public function party()
     {
         return $this->morphTo(null, 'party_type', 'party_id');
+    }
+
+    public function paymentAllocations()
+    {
+        return $this->hasMany(PaymentAllocation::class);
+    }
+
+    public function invoiceAdjustments()
+    {
+        return $this->hasMany(InvoiceAdjustment::class);
     }
 }

@@ -2,15 +2,19 @@
 
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\AccountController;
+use App\Http\Controllers\Api\V1\AccountTransactionCategoryController;
 use App\Http\Controllers\Api\V1\AccountTransactionController;
 use App\Http\Controllers\Api\V1\BrandController;
 use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\CountryController;
 use App\Http\Controllers\Api\V1\CustomerController;
+use App\Http\Controllers\Api\V1\CustomerReportController;
+use App\Http\Controllers\Api\V1\InvoiceAdjustmentController;
 use App\Http\Controllers\Api\V1\ProfileController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\RoleController;
 use App\Http\Controllers\Api\V1\SupplierController;
+use App\Http\Controllers\Api\V1\SupplierReportController;
 use App\Http\Controllers\Api\V1\TenantController;
 use App\Http\Controllers\Api\V1\TenantProfileController;
 use App\Http\Controllers\Api\V1\TransactionController;
@@ -73,11 +77,15 @@ Route::prefix('v1')->middleware(['api'])->group(function () {
         Route::delete('/categories/{category}', [CategoryController::class, 'destroy'])->middleware('permission:manage_products|product.delete');
 
         Route::get('/suppliers', [SupplierController::class, 'index'])->middleware('permission:manage_inventory|supplier.view');
+        Route::get('/suppliers/pending-summary', [SupplierController::class, 'pendingSummary'])->middleware('permission:manage_inventory|supplier.view');
+        Route::get('/suppliers/{supplier}/ledger', [SupplierController::class, 'ledger'])->middleware('permission:manage_inventory|supplier.view');
         Route::post('/suppliers', [SupplierController::class, 'store'])->middleware('permission:manage_inventory|supplier.create');
         Route::put('/suppliers/{supplier}', [SupplierController::class, 'update'])->middleware('permission:manage_inventory|supplier.edit');
         Route::delete('/suppliers/{supplier}', [SupplierController::class, 'destroy'])->middleware('permission:manage_inventory|supplier.delete');
 
         Route::get('/customers', [CustomerController::class, 'index'])->middleware('permission:manage_inventory|customer.view');
+        Route::get('/customers/pending-summary', [CustomerController::class, 'pendingSummary'])->middleware('permission:manage_inventory|customer.view');
+        Route::get('/customers/{customer}/ledger', [CustomerController::class, 'ledger'])->middleware('permission:manage_inventory|customer.view');
         Route::post('/customers', [CustomerController::class, 'store'])->middleware('permission:manage_inventory|customer.create');
         Route::put('/customers/{customer}', [CustomerController::class, 'update'])->middleware('permission:manage_inventory|customer.edit');
         Route::delete('/customers/{customer}', [CustomerController::class, 'destroy'])->middleware('permission:manage_inventory|customer.delete');
@@ -112,12 +120,24 @@ Route::prefix('v1')->middleware(['api'])->group(function () {
         Route::put('/account-transactions/{accountTransaction}', [AccountTransactionController::class, 'update'])->middleware('permission:manage_orders|account.transactions.edit');
         Route::delete('/account-transactions/{accountTransaction}', [AccountTransactionController::class, 'destroy'])->middleware('permission:manage_orders|account.transactions.delete');
 
+        Route::get('/account-transaction-categories', [AccountTransactionCategoryController::class, 'index'])->middleware('permission:manage_orders|account.transactions.view');
+        Route::post('/account-transaction-categories', [AccountTransactionCategoryController::class, 'store'])->middleware('permission:manage_orders|account.transactions.create');
+        Route::put('/account-transaction-categories/{accountTransactionCategory}', [AccountTransactionCategoryController::class, 'update'])->middleware('permission:manage_orders|account.transactions.edit');
+        Route::delete('/account-transaction-categories/{accountTransactionCategory}', [AccountTransactionCategoryController::class, 'destroy'])->middleware('permission:manage_orders|account.transactions.delete');
+
         Route::get('/payments', [PaymentController::class, 'index'])->middleware('permission:manage_orders|purchase.view|sales.view');
         Route::get('/payments/{payment}', [PaymentController::class, 'show'])->middleware('permission:manage_orders|purchase.view|sales.view');
         Route::get('/payments/serial/{serial}', [PaymentController::class, 'showBySerial'])->middleware('permission:manage_orders|purchase.view|sales.view');
         Route::post('/payments', [PaymentController::class, 'store'])->middleware('permission:manage_orders|purchase.create|sales.create');
         Route::put('/payments/{payment}', [PaymentController::class, 'update'])->middleware('permission:manage_orders|purchase.edit|sales.edit');
         Route::delete('/payments/{payment}', [PaymentController::class, 'destroy'])->middleware('permission:manage_orders|purchase.delete|sales.delete');
+
+        Route::get('/invoice-adjustments', [InvoiceAdjustmentController::class, 'index'])->middleware('permission:manage_orders|sales.view');
+        Route::post('/invoice-adjustments', [InvoiceAdjustmentController::class, 'store'])->middleware('permission:manage_orders|sales.edit');
+        Route::delete('/invoice-adjustments/{invoiceAdjustment}', [InvoiceAdjustmentController::class, 'destroy'])->middleware('permission:manage_orders|sales.edit');
+
+        Route::get('/reports/customer-aging', [CustomerReportController::class, 'aging'])->middleware('permission:manage_orders|sales.view');
+        Route::get('/reports/supplier-aging', [SupplierReportController::class, 'aging'])->middleware('permission:manage_inventory|purchase.view');
 
         Route::post('/transactions/purchase', [TransactionController::class, 'purchase'])
             ->middleware('permission:manage_inventory|purchase.create');

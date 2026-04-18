@@ -60,18 +60,25 @@ export const Layout = () => {
   }, [location.pathname, isMobile]);
 
   useEffect(() => {
-    const cached = localStorage.getItem('current_user');
-    if (cached) {
-      try {
-        updateCurrentUser(JSON.parse(cached));
-      } catch {
-        localStorage.removeItem('current_user');
-      }
-    }
+    let active = true;
 
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      authApi.getProfile().then((profile) => {
+    const hydrateAndBootstrap = async () => {
+      const token = localStorage.getItem('auth_token');
+      if (!token) return;
+
+      const cached = localStorage.getItem('current_user');
+      if (cached) {
+        try {
+          updateCurrentUser(JSON.parse(cached));
+        } catch {
+          localStorage.removeItem('current_user');
+        }
+      }
+
+      try {
+        const profile = await authApi.getProfile();
+        if (!active) return;
+
         updateCurrentUser({
           id: String(profile.id),
           name: profile.name,
@@ -82,10 +89,21 @@ export const Layout = () => {
           must_change_password: (profile as any).must_change_password ?? false,
           permissions: (profile as any).permissions ?? [],
         });
-      }).catch(() => undefined);
-    }
+      } catch {
+        // 401 handling and redirect are already centralized in api client interceptor.
+        return;
+      }
 
-    bootstrapData();
+      if (active) {
+        bootstrapData();
+      }
+    };
+
+    hydrateAndBootstrap();
+
+    return () => {
+      active = false;
+    };
   }, [bootstrapData, updateCurrentUser]);
 
   useEffect(() => {
@@ -298,7 +316,12 @@ export const Layout = () => {
             )}
           </div>
           {isMobile && (
-            <button onClick={() => setMobileOpen(false)} className="text-gray-500 hover:text-gray-700">
+            <button
+              onClick={() => setMobileOpen(false)}
+              className="text-gray-500 hover:text-gray-700"
+              title="Close menu"
+              aria-label="Close menu"
+            >
               <X className="h-5 w-5" />
             </button>
           )}
@@ -313,7 +336,10 @@ export const Layout = () => {
 
           {/* Section labels removed */}
           <NavItem to="/invoices" label="Invoices" icon={TrendingUp} perm="invoices.view" />
+          <NavItem to="/receivables" label="Receivables" icon={DollarSign} perm="invoices.view" />
+          <NavItem to="/payables" label="Payables" icon={ShoppingCart} perm="purchase.view" />
           <NavItem to="/accounts" label="Accounts" icon={Wallet} perm="account.view" />
+          <NavItem to="/finance" label="Finance" icon={Briefcase} perm="account.transactions.view" />
 
           {/* Section labels removed */}
           {/* Reports removed as requested */}
@@ -385,6 +411,8 @@ export const Layout = () => {
               <button 
                 onClick={() => setMobileOpen(true)}
                 className="p-2 hover:bg-gray-100 rounded text-gray-600"
+                title="Open menu"
+                aria-label="Open menu"
               >
                 <Menu className="h-5 w-5" />
               </button>

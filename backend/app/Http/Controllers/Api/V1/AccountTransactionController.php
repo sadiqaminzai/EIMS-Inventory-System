@@ -9,9 +9,12 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentDetail;
+use App\Services\PaymentAllocationService;
 use App\Support\ModuleSequenceService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class AccountTransactionController extends Controller
 {
@@ -23,6 +26,10 @@ class AccountTransactionController extends Controller
             $query->where('type', $request->input('type'));
         }
 
+        if ($request->filled('category_type')) {
+            $query->where('category_type', $request->input('category_type'));
+        }
+
         return $query->get();
     }
 
@@ -32,6 +39,7 @@ class AccountTransactionController extends Controller
             'account_id' => ['required', 'integer'],
             'to_account_id' => ['nullable', 'integer'],
             'type' => ['required', 'string'],
+            'category_type' => ['nullable', Rule::in(['expense', 'other_income'])],
             'category' => ['nullable', 'string'],
             'amount' => ['required', 'numeric'],
             'currency' => ['required', 'string'],
@@ -41,8 +49,14 @@ class AccountTransactionController extends Controller
             'reference_id' => ['nullable', 'string'],
             'description' => ['nullable', 'string'],
             'attachment' => ['nullable', 'string'],
+            'attachment_file' => ['nullable', 'file', 'max:10240', 'mimes:pdf,jpg,jpeg,png,webp,doc,docx,xls,xlsx,csv,txt'],
             'date' => ['required', 'date'],
         ]);
+
+        if ($request->hasFile('attachment_file')) {
+            $path = $request->file('attachment_file')->store('account-transactions', 'public');
+            $data['attachment'] = asset('storage/' . ltrim($path, '/'));
+        }
 
         $transaction = DB::transaction(function () use ($data, $request) {
             $serial = app(ModuleSequenceService::class)->next('account_tx');
@@ -76,6 +90,7 @@ class AccountTransactionController extends Controller
             'account_id' => ['required', 'integer'],
             'to_account_id' => ['nullable', 'integer'],
             'type' => ['required', 'string'],
+            'category_type' => ['nullable', Rule::in(['expense', 'other_income'])],
             'category' => ['nullable', 'string'],
             'amount' => ['required', 'numeric'],
             'currency' => ['required', 'string'],
@@ -85,8 +100,19 @@ class AccountTransactionController extends Controller
             'reference_id' => ['nullable', 'string'],
             'description' => ['nullable', 'string'],
             'attachment' => ['nullable', 'string'],
+            'attachment_file' => ['nullable', 'file', 'max:10240', 'mimes:pdf,jpg,jpeg,png,webp,doc,docx,xls,xlsx,csv,txt'],
+            'remove_attachment' => ['nullable', 'boolean'],
             'date' => ['required', 'date'],
         ]);
+
+        if ($request->hasFile('attachment_file')) {
+            $this->deleteAttachmentFile($accountTransaction->attachment);
+            $path = $request->file('attachment_file')->store('account-transactions', 'public');
+            $data['attachment'] = asset('storage/' . ltrim($path, '/'));
+        } elseif ($request->boolean('remove_attachment')) {
+            $this->deleteAttachmentFile($accountTransaction->attachment);
+            $data['attachment'] = null;
+        }
 
         $transaction = DB::transaction(function () use ($accountTransaction, $data, $request) {
             $original = $accountTransaction->replicate();
@@ -138,14 +164,10 @@ class AccountTransactionController extends Controller
                     $payment = $paymentQuery->first();
 
                     if ($payment) {
-                        $payment->load('details');
-                        foreach ($payment->details as $detail) {
-                            $amount = (float) ($detail->credit_amount ?? 0);
-                            if ($amount <= 0) {
-                                continue;
-                            }
-                            $this->reversePaymentFromOrders((int) $detail->customer_id, $amount, $accountTransaction->updated_by ?? $accountTransaction->created_by ?? 0);
-                        }
+                        app(PaymentAllocationService::class)->reversePaymentAllocations(
+                            $payment,
+                            $accountTransaction->updated_by ?? $accountTransaction->created_by ?? 0
+                        );
 
                         PaymentDetail::where('payment_id', $payment->id)->delete();
                         $payment->delete();
@@ -153,11 +175,30 @@ class AccountTransactionController extends Controller
                 }
                 $account->decrement('balance', $accountTransaction->amount);
             } elseif ($accountTransaction->type === 'Expense') {
+                if ($accountTransaction->reference_id) {
+                    $paymentQuery = Payment::query()->where('serial_no', $accountTransaction->reference_id);
+                    if (is_numeric($accountTransaction->reference_id)) {
+                        $paymentQuery->orWhere('id', (int) $accountTransaction->reference_id);
+                    }
+                    $payment = $paymentQuery->first();
+
+                    if ($payment) {
+                        app(PaymentAllocationService::class)->reversePaymentAllocations(
+                            $payment,
+                            $accountTransaction->updated_by ?? $accountTransaction->created_by ?? 0
+                        );
+
+                        PaymentDetail::where('payment_id', $payment->id)->delete();
+                        $payment->delete();
+                    }
+                }
                 $account->increment('balance', $accountTransaction->amount);
             } elseif ($accountTransaction->type === 'Transfer' && $accountTransaction->to_account_id) {
                 $account->increment('balance', $accountTransaction->amount);
                 Account::where('id', $accountTransaction->to_account_id)->decrement('balance', $accountTransaction->amount);
             }
+
+            $this->deleteAttachmentFile($accountTransaction->attachment);
 
             $accountTransaction->delete();
         });
@@ -195,5 +236,41 @@ class AccountTransactionController extends Controller
 
             $remaining -= $apply;
         }
+    }
+
+    protected function deleteAttachmentFile(?string $attachment): void
+    {
+        $path = $this->extractPublicStoragePath($attachment);
+
+        if ($path && Storage::disk('public')->exists($path)) {
+            Storage::disk('public')->delete($path);
+        }
+    }
+
+    protected function extractPublicStoragePath(?string $attachment): ?string
+    {
+        if (!$attachment) {
+            return null;
+        }
+
+        $path = parse_url($attachment, PHP_URL_PATH) ?? '';
+
+        if (str_starts_with($path, '/storage/')) {
+            return ltrim(substr($path, strlen('/storage/')), '/');
+        }
+
+        if (str_starts_with($path, '/media/')) {
+            return ltrim(substr($path, strlen('/media/')), '/');
+        }
+
+        if (str_starts_with($attachment, 'storage/')) {
+            return ltrim(substr($attachment, strlen('storage/')), '/');
+        }
+
+        if (!str_contains($attachment, '://') && !str_starts_with($attachment, '/')) {
+            return ltrim($attachment, '/');
+        }
+
+        return null;
     }
 }

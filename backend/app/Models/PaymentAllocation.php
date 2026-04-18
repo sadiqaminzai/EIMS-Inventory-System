@@ -7,26 +7,33 @@ use App\Models\Supplier;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-class PaymentDetail extends Model
+class PaymentAllocation extends Model
 {
     use HasFactory, HasTenant;
 
     protected $fillable = [
         'tenant_id',
         'payment_id',
+        'order_id',
         'customer_id',
         'supplier_id',
-        'debit_amount',
-        'credit_amount',
-        'balance_amount',
-        'remarks',
+        'allocated_amount',
         'created_by',
         'updated_by',
+    ];
+
+    protected $casts = [
+        'allocated_amount' => 'decimal:2',
     ];
 
     public function payment()
     {
         return $this->belongsTo(Payment::class);
+    }
+
+    public function order()
+    {
+        return $this->belongsTo(Order::class);
     }
 
     public function customer()
