@@ -23,7 +23,9 @@ type FormPaymentDetailRow = {
     allocations?: FormAllocationRow[];
 };
 
-export const TransactionForm = ({ initialData, paymentData, onSave, onCancel }: { initialData?: Transaction, paymentData?: Payment, onSave: (data: any) => void, onCancel: () => void }) => {
+type TransactionTypeOption = 'Payment' | 'Income' | 'Expense' | 'Transfer';
+
+export const TransactionForm = ({ initialData, paymentData, allowedTypesOverride, onSave, onCancel }: { initialData?: Transaction, paymentData?: Payment, allowedTypesOverride?: TransactionTypeOption[], onSave: (data: any) => void, onCancel: () => void }) => {
     // Safety check for useStore
     const store = useStore ? useStore() : null;
     if (!store) return <div className="p-4 text-center text-gray-500">Loading form...</div>;
@@ -107,13 +109,17 @@ export const TransactionForm = ({ initialData, paymentData, onSave, onCancel }: 
     const paymentType = watch('payment_type') === 'payable' ? 'payable' : 'receivable';
     const partyLabel = paymentType === 'payable' ? 'Supplier' : 'Customer';
     const invoiceLabel = paymentType === 'payable' ? 'Purchase Invoice' : 'Invoice';
-    const typePermissions: Record<string, string> = {
+    const typePermissions: Record<TransactionTypeOption, string> = {
         Payment: 'account.transaction.payment',
         Income: 'account.transaction.income',
         Expense: 'account.transaction.expense',
         Transfer: 'account.transaction.transfer'
     };
-    const allowedTypes = ['Payment', 'Income', 'Expense', 'Transfer']
+    const allTypes: TransactionTypeOption[] = ['Payment', 'Income', 'Expense', 'Transfer'];
+    const visibleTypes = allowedTypesOverride?.length
+        ? allTypes.filter((typeOption) => allowedTypesOverride.includes(typeOption))
+        : allTypes;
+    const allowedTypes = visibleTypes
         .filter((t) => hasPermission?.(typePermissions[t] as any));
     const showPaymentMode = type === 'Payment' && (!initialData || isPaymentEdit || isPaymentPrefill);
 
@@ -465,8 +471,8 @@ export const TransactionForm = ({ initialData, paymentData, onSave, onCancel }: 
                     <DenseInput label="Date" type="date" {...register('date', { required: true })} className="w-40" />
                 </div>
                 <div className="flex gap-3 flex-wrap justify-end w-full md:w-auto">
-                    {['Payment', 'Income', 'Expense', 'Transfer'].map(t => {
-                        const allowed = hasPermission?.(typePermissions[t] as any);
+                    {visibleTypes.map((t) => {
+                        const allowed = allowedTypes.includes(t);
                         return (
                             <label key={t} className={clsx("flex items-center gap-2", allowed ? "cursor-pointer" : "cursor-not-allowed opacity-40")}> 
                                 <input 

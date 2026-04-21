@@ -13,8 +13,13 @@ import { ActionButtons } from '../components/ui/ActionButtons';
 import { ConfirmationDialog } from '../components/ui/ConfirmationDialog';
 import { formatDateTime } from '../utils/dateTime';
 
-type FinanceTab = 'expenses' | 'expense-categories' | 'other-income' | 'other-income-categories';
+export type FinanceTab = 'expenses' | 'expense-categories' | 'other-income' | 'other-income-categories';
 type CategoryStatus = 'active' | 'inactive';
+
+type FinancePageProps = {
+  embedded?: boolean;
+  forcedTab?: FinanceTab;
+};
 
 type FinanceCategory = {
   id: string;
@@ -304,7 +309,7 @@ const CategoryEntryForm = ({
   );
 };
 
-export const FinancePage = () => {
+export const FinancePage = ({ embedded = false, forcedTab }: FinancePageProps = {}) => {
   const {
     hasPermission,
     accounts,
@@ -330,7 +335,7 @@ export const FinancePage = () => {
     { id: 'other-income-categories' as const, label: 'Other Income Categories', icon: Tag },
   ];
 
-  const [activeTab, setActiveTab] = useState<FinanceTab>('expenses');
+  const [activeTab, setActiveTab] = useState<FinanceTab>(forcedTab ?? 'expenses');
   const [categories, setCategories] = useState<FinanceCategory[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(false);
 
@@ -348,6 +353,12 @@ export const FinancePage = () => {
   const [expenseAccountFilter, setExpenseAccountFilter] = useState('all');
   const [otherIncomeCategoryFilter, setOtherIncomeCategoryFilter] = useState('all');
   const [otherIncomeAccountFilter, setOtherIncomeAccountFilter] = useState('all');
+
+  useEffect(() => {
+    if (forcedTab) {
+      setActiveTab(forcedTab);
+    }
+  }, [forcedTab]);
 
   const loadCategories = useCallback(async () => {
     setIsLoadingCategories(true);
@@ -672,37 +683,40 @@ export const FinancePage = () => {
     return <div>Access Denied</div>;
   }
 
+  const currentTab = forcedTab ?? activeTab;
   const transactionModalTitle = `${editingTransaction ? 'Edit' : 'Add'} ${transactionMode === 'expense' ? 'Expense' : 'Other Income'}`;
   const categoryModalTitle = `${editingCategory ? 'Edit' : 'Add'} ${categoryMode === 'expense' ? 'Expense Category' : 'Other Income Category'}`;
 
   return (
-    <div className="flex flex-col h-full space-y-4">
-      <div className="bg-white border-b border-gray-200 px-6 pt-2 rounded-t-lg shadow-sm">
-        <div className="flex items-center gap-2 mb-2">
-          <Wallet className="w-5 h-5 text-gray-500" />
-          <h1 className="text-xl font-bold text-gray-900">Finance Management</h1>
+    <div className={embedded ? 'space-y-4' : 'flex flex-col h-full space-y-4'}>
+      {!embedded && (
+        <div className="bg-white border-b border-gray-200 px-6 pt-2 rounded-t-lg shadow-sm">
+          <div className="flex items-center gap-2 mb-2">
+            <Wallet className="w-5 h-5 text-gray-500" />
+            <h1 className="text-xl font-bold text-gray-900">Finance Management</h1>
+          </div>
+          <nav className="-mb-px flex space-x-6 overflow-x-auto">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={clsx(
+                  'group inline-flex items-center py-4 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap',
+                  currentTab === tab.id
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                )}
+              >
+                <tab.icon className={clsx('mr-2 h-4 w-4', currentTab === tab.id ? 'text-blue-500' : 'text-gray-400 group-hover:text-gray-500')} />
+                {tab.label}
+              </button>
+            ))}
+          </nav>
         </div>
-        <nav className="-mb-px flex space-x-6 overflow-x-auto">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={clsx(
-                'group inline-flex items-center py-4 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap',
-                activeTab === tab.id
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              )}
-            >
-              <tab.icon className={clsx('mr-2 h-4 w-4', activeTab === tab.id ? 'text-blue-500' : 'text-gray-400 group-hover:text-gray-500')} />
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      )}
 
-      <div className="flex-1 bg-white rounded-b-lg border border-gray-200 shadow-sm p-4 overflow-hidden">
-        {activeTab === 'expenses' && (
+      <div className={clsx('bg-white border border-gray-200 shadow-sm p-4 overflow-hidden', embedded ? 'rounded-lg' : 'flex-1 rounded-b-lg')}>
+        {currentTab === 'expenses' && (
           <DenseTable
             data={filteredExpenseTransactions}
             columns={transactionColumns('expense')}
@@ -740,7 +754,7 @@ export const FinancePage = () => {
           />
         )}
 
-        {activeTab === 'expense-categories' && (
+        {currentTab === 'expense-categories' && (
           <DenseTable
             data={expenseCategories}
             columns={categoryColumns('expense')}
@@ -757,7 +771,7 @@ export const FinancePage = () => {
           />
         )}
 
-        {activeTab === 'other-income' && (
+        {currentTab === 'other-income' && (
           <DenseTable
             data={filteredOtherIncomeTransactions}
             columns={transactionColumns('other_income')}
@@ -795,7 +809,7 @@ export const FinancePage = () => {
           />
         )}
 
-        {activeTab === 'other-income-categories' && (
+        {currentTab === 'other-income-categories' && (
           <DenseTable
             data={otherIncomeCategories}
             columns={categoryColumns('other_income')}

@@ -8,7 +8,6 @@ import { PurchasesPage } from './pages/PurchasesPage';
 import { SalesPage } from './pages/SalesPage';
 import { ReturnsPage } from './pages/ReturnsPage';
 import { AccountsPage } from './pages/AccountsPage';
-import { FinancePage } from './pages/FinancePage';
 import { PayablesPage } from './pages/PayablesPage';
 import { ReceivablesPage } from './pages/ReceivablesPage';
 import { ReportsPage } from './pages/ReportsPage';
@@ -48,7 +47,7 @@ const routes = [
       { path: "sales", element: <Navigate to="/invoices" replace /> },
       { path: "returns", element: <ReturnsPage /> },
       { path: "accounts", element: <AccountsPage /> },
-      { path: "finance", element: <FinancePage /> },
+      { path: "finance", element: <Navigate to="/accounts" replace /> },
       { path: "payables", element: <PayablesPage /> },
       { path: "receivables", element: <ReceivablesPage /> },
       { path: "reports", element: <ReportsPage /> },

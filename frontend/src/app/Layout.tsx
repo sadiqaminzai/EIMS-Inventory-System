@@ -19,7 +19,6 @@ import {
   ChevronRight,
   ChevronDown,
   X,
-  Briefcase,
   Wallet,
   Save
 } from 'lucide-react';
@@ -339,7 +338,6 @@ export const Layout = () => {
           <NavItem to="/receivables" label="Receivables" icon={DollarSign} perm="invoices.view" />
           <NavItem to="/payables" label="Payables" icon={ShoppingCart} perm="purchase.view" />
           <NavItem to="/accounts" label="Accounts" icon={Wallet} perm="account.view" />
-          <NavItem to="/finance" label="Finance" icon={Briefcase} perm="account.transactions.view" />
 
           {/* Section labels removed */}
           {/* Reports removed as requested */}

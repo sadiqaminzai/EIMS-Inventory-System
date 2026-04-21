@@ -16,6 +16,7 @@ import { Combobox } from '../components/ui/Combobox';
 import { TransactionForm } from '../components/forms/TransactionForm';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import { paymentApi } from '../../api/payments';
+import { FinancePage, FinanceTab } from './FinancePage';
 
 type LedgerPaymentPrefillState = {
     openPaymentWith?: {
@@ -30,6 +31,9 @@ type LedgerPaymentPrefillState = {
         auto_allocate?: boolean;
     };
 };
+
+type AccountsTab = 'accounts' | 'transactions' | FinanceTab;
+const financeTabIds: FinanceTab[] = ['expenses', 'expense-categories', 'other-income', 'other-income-categories'];
 
 // --- Account Form ---
 const AccountForm = ({ initialData, onSave, onCancel }: { initialData?: Account, onSave: (data: any) => void, onCancel: () => void }) => {
@@ -533,16 +537,20 @@ export const AccountsPage = () => {
 
     const tabs = [
         { id: 'transactions' as const, label: 'Transactions', perm: 'account.transactions.view' },
-        { id: 'accounts' as const, label: 'Accounts', perm: 'account.accounts.view' }
+        { id: 'accounts' as const, label: 'Accounts', perm: 'account.accounts.view' },
+        { id: 'expenses' as const, label: 'Expenses', perm: 'account.transactions.view' },
+        { id: 'expense-categories' as const, label: 'Expense Categories', perm: 'account.transactions.view' },
+        { id: 'other-income' as const, label: 'Other Income', perm: 'account.transactions.view' },
+        { id: 'other-income-categories' as const, label: 'Other Income Categories', perm: 'account.transactions.view' }
     ];
     const visibleTabs = tabs.filter((tab) => hasPermission(tab.perm as any));
-    const [activeTab, setActiveTab] = useState<'accounts' | 'transactions'>(
-        (visibleTabs[0]?.id as 'accounts' | 'transactions') || 'transactions'
+    const [activeTab, setActiveTab] = useState<AccountsTab>(
+        (visibleTabs[0]?.id as AccountsTab) || 'transactions'
     );
 
     useEffect(() => {
         if (visibleTabs.length > 0 && !visibleTabs.find((t) => t.id === activeTab)) {
-            setActiveTab(visibleTabs[0].id as 'accounts' | 'transactions');
+            setActiveTab(visibleTabs[0].id as AccountsTab);
         }
     }, [visibleTabs, activeTab]);
 
@@ -613,9 +621,11 @@ export const AccountsPage = () => {
     const [editingPayment, setEditingPayment] = useState<Payment | undefined>(undefined);
     const [viewingPayment, setViewingPayment] = useState<Payment | undefined>(undefined);
     const [paymentPrefill, setPaymentPrefill] = useState<any | undefined>(undefined);
+        const isPaymentTransaction = (item: Transaction) => (item.type === 'Income' || item.type === 'Expense')
+            && (item.category === 'Customer Receipts' || item.category === 'Supplier Payments');
+
         const handleViewTransaction = async (item: Transaction) => {
-            const isPaymentTx = (item.type === 'Income' || item.type === 'Expense')
-                && (item.category === 'Customer Receipts' || item.category === 'Supplier Payments');
+            const isPaymentTx = isPaymentTransaction(item);
 
             if (isPaymentTx && item.reference_id) {
                 try {
@@ -654,8 +664,7 @@ export const AccountsPage = () => {
         setEditingTransaction(item);
         setEditingPayment(undefined);
 
-        const isPaymentTx = (item.type === 'Income' || item.type === 'Expense')
-            && (item.category === 'Customer Receipts' || item.category === 'Supplier Payments');
+        const isPaymentTx = isPaymentTransaction(item);
 
         if (isPaymentTx && item.reference_id) {
             try {
@@ -700,6 +709,9 @@ export const AccountsPage = () => {
             end: parseISO(dateRange.end)
         });
     });
+
+    const accountLedgerTransactions = filteredTransactions
+        .filter((transaction) => transaction.type === 'Transfer' || isPaymentTransaction(transaction));
 
     // 3. Calculate Income/Expenses from Filtered Transactions (Split by Currency)
     const incomeUSD = filteredTransactions
@@ -801,7 +813,7 @@ export const AccountsPage = () => {
         return '';
     };
 
-    const enrichedTransactions = filteredTransactions.map(t => {
+    const enrichedTransactions = accountLedgerTransactions.map(t => {
         const customerName = resolveTransactionCustomerName(t);
         const acc = accounts.find(a => a.id === t.account_id);
         const toAcc = t.to_account_id ? accounts.find(a => a.id === t.to_account_id) : null;
@@ -826,6 +838,8 @@ export const AccountsPage = () => {
         const bTime = b.created_at ? new Date(b.created_at).getTime() : new Date(b.date).getTime();
         return bTime - aTime;
     });
+
+    const isFinanceTabActive = financeTabIds.includes(activeTab as FinanceTab);
 
     const transactionColumns = [
         { 
@@ -920,117 +934,122 @@ export const AccountsPage = () => {
     ];
 
     return (
-        <div className="space-y-6">
-            {/* Date Filter & Header Controls */}
-            <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                <div className="flex flex-col md:flex-row gap-4 items-end md:items-center justify-between">
-                   <div className="flex gap-4 items-center w-full md:w-auto">
-                        <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
-                            <Calendar size={16} className="text-gray-500" />
-                            <input 
-                                type="date" 
-                                value={dateRange.start}
-                                onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-                                title="Start date"
-                                aria-label="Start date"
-                                className="bg-transparent border-none text-sm focus:ring-0 p-0 text-gray-700 w-32"
-                            />
-                            <span className="text-gray-400">-</span>
-                            <input 
-                                type="date" 
-                                value={dateRange.end}
-                                onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-                                title="End date"
-                                aria-label="End date"
-                                className="bg-transparent border-none text-sm focus:ring-0 p-0 text-gray-700 w-32"
-                            />
+        <div className="flex flex-col h-full space-y-4">
+            <div className="bg-white border-b border-gray-200 px-6 pt-2 rounded-t-lg shadow-sm shrink-0">
+                 <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                        <Wallet className="w-5 h-5 text-gray-500" />
+                        <h1 className="text-xl font-bold text-gray-900">Accounts & Finance</h1>
+                    </div>
+                    {/* Date filter aligned to the right inside the header */}
+                    <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
+                        <Calendar size={16} className="text-gray-500" />
+                        <input 
+                            type="date" 
+                            value={dateRange.start}
+                            onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                            title="Start date"
+                            aria-label="Start date"
+                            className="bg-transparent border-none text-sm focus:ring-0 p-0 text-gray-700 w-32"
+                        />
+                        <span className="text-gray-400">-</span>
+                        <input 
+                            type="date" 
+                            value={dateRange.end}
+                            onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                            title="End date"
+                            aria-label="End date"
+                            className="bg-transparent border-none text-sm focus:ring-0 p-0 text-gray-700 w-32"
+                        />
+                    </div>
+                 </div>
+                 
+                 <nav className="-mb-px flex space-x-6 overflow-x-auto">
+                    {visibleTabs.map((tab) => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            className={clsx(
+                                "group inline-flex items-center py-4 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap",
+                                activeTab === tab.id 
+                                    ? "border-blue-500 text-blue-600" 
+                                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                            )}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                </nav>
+            </div>
+
+            <div className="flex-1 flex flex-col gap-4 overflow-hidden px-4 pt-2 pb-4">
+                {/* Account Summary Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
+                    <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Total Balance (USD)</p>
+                        <p className="text-2xl font-bold text-gray-900 mt-1">${totalBalanceUSD.toLocaleString()}</p>
+                    </div>
+                    <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Total Balance (AFN)</p>
+                        <p className="text-2xl font-bold text-gray-900 mt-1">؋{totalBalanceAFN.toLocaleString()}</p>
+                    </div>
+                    <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Net Income (This Month)</p>
+                        <div className="mt-1">
+                            <p className={clsx("text-lg font-bold", incomeUSD - expenseUSD >= 0 ? "text-green-600" : "text-red-600")}>
+                                ${(incomeUSD - expenseUSD).toLocaleString()}
+                            </p>
+                            <p className={clsx("text-xs font-medium", incomeAFN - expenseAFN >= 0 ? "text-green-600" : "text-red-600")}>
+                                ؋{(incomeAFN - expenseAFN).toLocaleString()}
+                            </p>
                         </div>
-                   </div>
-                   
-                   <div className="flex gap-2 w-full md:w-auto">
-                       <div className="flex bg-gray-100 p-1 rounded-lg">
-                           {visibleTabs.map((tab) => (
-                               <button 
-                                    key={tab.id}
-                                    onClick={() => setActiveTab(tab.id)}
-                                    className={clsx("px-3 py-1.5 rounded-md text-sm font-medium transition-all", 
-                                        activeTab === tab.id ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-                                    )}
-                               >
-                                   {tab.label}
-                               </button>
-                           ))}
-                       </div>
-                       
-                       {(activeTab === 'accounts' ? hasPermission('account.accounts.create') : hasPermission('account.transactions.create')) && (
-                         <Button onClick={() => {
-                             if (activeTab === 'accounts') {
-                                 setEditingAccount(undefined);
-                                 setIsAccountModalOpen(true);
-                             } else {
-                                 setPaymentPrefill(undefined);
-                                 setEditingTransaction(undefined);
-                                 setIsTransactionModalOpen(true);
-                             }
-                         }} className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1 rounded-full px-4">
-                             <Plus className="h-4 w-4" />
-                             <span>Add</span>
-                         </Button>
-                       )}
-                   </div>
-                </div>
-            </div>
-
-            {/* Account Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                    <p className="text-xs font-semibold text-gray-500 uppercase">Total Balance (USD)</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">${totalBalanceUSD.toLocaleString()}</p>
-                </div>
-                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                    <p className="text-xs font-semibold text-gray-500 uppercase">Total Balance (AFN)</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">؋{totalBalanceAFN.toLocaleString()}</p>
-                </div>
-                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                    <p className="text-xs font-semibold text-gray-500 uppercase">Net Income (This Month)</p>
-                    <div className="mt-1">
-                        <p className={clsx("text-lg font-bold", incomeUSD - expenseUSD >= 0 ? "text-green-600" : "text-red-600")}>
-                            ${(incomeUSD - expenseUSD).toLocaleString()}
-                        </p>
-                        <p className={clsx("text-xs font-medium", incomeAFN - expenseAFN >= 0 ? "text-green-600" : "text-red-600")}>
-                            ؋{(incomeAFN - expenseAFN).toLocaleString()}
-                        </p>
+                    </div>
+                    <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Total Expenses (This Month)</p>
+                        <div className="mt-1">
+                            <p className="text-lg font-bold text-red-600">${expenseUSD.toLocaleString()}</p>
+                            <p className="text-xs font-medium text-red-600">؋{expenseAFN.toLocaleString()}</p>
+                        </div>
                     </div>
                 </div>
-                <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                    <p className="text-xs font-semibold text-gray-500 uppercase">Total Expenses (This Month)</p>
-                    <div className="mt-1">
-                        <p className="text-lg font-bold text-red-600">${expenseUSD.toLocaleString()}</p>
-                        <p className="text-xs font-medium text-red-600">؋{expenseAFN.toLocaleString()}</p>
-                    </div>
-                </div>
-            </div>
 
-            {activeTab === 'accounts' ? (
-                <DenseTable 
-                    data={accounts} 
-                    columns={accountColumns} 
-                    title="Accounts"
-                    hideHeader
-                    canSearch={hasPermission('account.accounts.search')}
-                    canExport={hasPermission('account.accounts.export')}
-                />
-            ) : (
-                <DenseTable 
-                    data={sortedTransactions} 
-                    columns={transactionColumns as any} 
-                    title="Transactions"
-                    hideHeader
-                    canSearch={hasPermission('account.transactions.search')}
-                    canExport={hasPermission('account.transactions.export')}
-                    defaultSort={{ key: 'created_at', direction: 'desc' }}
-                />
-            )}
+                {activeTab === 'accounts' ? (
+                    <div className="flex-1 bg-white rounded-lg border border-gray-200 shadow-sm p-4 overflow-hidden">
+                        <DenseTable 
+                            data={accounts} 
+                            columns={accountColumns} 
+                            title="Accounts"
+                            canSearch={hasPermission('account.accounts.search')}
+                            canExport={hasPermission('account.accounts.export')}
+                            canAdd={hasPermission('account.accounts.create')}
+                            onAdd={() => {
+                                setEditingAccount(undefined);
+                                setIsAccountModalOpen(true);
+                            }}
+                        />
+                    </div>
+                ) : activeTab === 'transactions' ? (
+                    <div className="flex-1 bg-white rounded-lg border border-gray-200 shadow-sm p-4 overflow-hidden">
+                        <DenseTable 
+                            data={sortedTransactions} 
+                            columns={transactionColumns as any} 
+                            title="Transactions"
+                            canSearch={hasPermission('account.transactions.search')}
+                            canExport={hasPermission('account.transactions.export')}
+                            canAdd={hasPermission('account.transactions.create')}
+                            onAdd={() => {
+                                setPaymentPrefill(undefined);
+                                setEditingTransaction(undefined);
+                                setIsTransactionModalOpen(true);
+                            }}
+                            defaultSort={{ key: 'created_at', direction: 'desc' }}
+                        />
+                    </div>
+                ) : isFinanceTabActive ? (
+                    <FinancePage embedded forcedTab={activeTab as FinanceTab} />
+                ) : null
+                }
+            </div>
 
             {/* Account Modal */}
             <Modal
@@ -1075,6 +1094,7 @@ export const AccountsPage = () => {
                 <TransactionForm 
                     initialData={editingPayment ? undefined : (paymentPrefill || editingTransaction)}
                     paymentData={editingPayment}
+                    allowedTypesOverride={['Payment', 'Transfer']}
                     onSave={(data) => {
                         if (data?.kind === 'payment') {
                             if (data?.payment_id) {
