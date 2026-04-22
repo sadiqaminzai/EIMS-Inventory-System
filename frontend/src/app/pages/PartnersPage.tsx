@@ -28,8 +28,8 @@ export const PartnersPage = () => {
     if (visibleTabs.length === 0) return <div>Access Denied</div>;
 
     return (
-        <div className="flex flex-col h-full space-y-4">
-            <div className="bg-white border-b border-gray-200 px-6 pt-2 rounded-t-lg shadow-sm">
+        <div className="flex-1 flex flex-col min-h-0 space-y-4 h-full">
+            <div className="bg-white border-b border-gray-200 px-6 pt-2 rounded-t-lg shadow-sm shrink-0">
                  <div className="flex items-center gap-2 mb-2">
                     <Users className="w-5 h-5 text-gray-500" />
                     <h1 className="text-xl font-bold text-gray-900">Partner Management</h1>

@@ -50,7 +50,7 @@ export const DenseTable = <T extends object>({
     key: defaultSort?.key || null, 
     direction: defaultSort?.direction || 'asc' 
   });
-  const itemsPerPage = 20;
+  const itemsPerPage = 50;
 
   // Search Logic (Elastic Search across all string fields)
   const filteredData = useMemo(() => {
@@ -127,7 +127,7 @@ export const DenseTable = <T extends object>({
   };
 
   return (
-    <div className="flex flex-col h-full bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+    <div className="flex flex-col bg-white border border-gray-200 rounded-lg shadow-sm w-full">
       {/* Header Toolbar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200 gap-3 md:gap-0">
         <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 w-full md:w-auto">
@@ -173,7 +173,7 @@ export const DenseTable = <T extends object>({
       </div>
 
       {/* Table Area */}
-      <div className="flex-1 overflow-auto">
+      <div className="overflow-x-auto overflow-y-visible">
         <table className="w-full text-left border-collapse">
           <thead className="bg-gray-100 sticky top-0 z-10 text-xs font-semibold text-gray-600 uppercase">
             <tr>

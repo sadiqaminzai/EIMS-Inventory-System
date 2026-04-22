@@ -688,7 +688,7 @@ export const FinancePage = ({ embedded = false, forcedTab }: FinancePageProps = 
   const categoryModalTitle = `${editingCategory ? 'Edit' : 'Add'} ${categoryMode === 'expense' ? 'Expense Category' : 'Other Income Category'}`;
 
   return (
-    <div className={embedded ? 'space-y-4' : 'flex flex-col h-full space-y-4'}>
+    <div className={embedded ? 'flex flex-col space-y-4' : 'flex flex-col space-y-4 pb-8'}>
       {!embedded && (
         <div className="bg-white border-b border-gray-200 px-6 pt-2 rounded-t-lg shadow-sm">
           <div className="flex items-center gap-2 mb-2">
@@ -715,7 +715,7 @@ export const FinancePage = ({ embedded = false, forcedTab }: FinancePageProps = 
         </div>
       )}
 
-      <div className={clsx('bg-white border border-gray-200 shadow-sm p-4 overflow-hidden', embedded ? 'rounded-lg' : 'flex-1 rounded-b-lg')}>
+      <div className={clsx('flex flex-col overflow-hidden', !embedded && 'bg-white border border-gray-200 shadow-sm rounded-lg')}>
         {currentTab === 'expenses' && (
           <DenseTable
             data={filteredExpenseTransactions}

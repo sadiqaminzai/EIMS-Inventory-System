@@ -339,8 +339,10 @@ export const Layout = () => {
           <NavItem to="/payables" label="Payables" icon={ShoppingCart} perm="purchase.view" />
           <NavItem to="/accounts" label="Accounts" icon={Wallet} perm="account.view" />
 
-          {/* Section labels removed */}
-          {/* Reports removed as requested */}
+          {(hasPermission('manage_orders') || hasPermission('manage_inventory') || hasPermission('sales.view') || hasPermission('invoices.view') || hasPermission('inventory.view') || hasPermission('purchase.view') || hasPermission('customer.view') || hasPermission('product.view') || hasPermission('brand.view') || hasPermission('report.view') || hasPermission('reports.view')) && (
+            <NavItem to="/reports" label="Reports" icon={FileText} />
+          )}
+
           {/* Settings - show if user has any settings permission */}
           {(hasPermission('settings.view') || hasPermission('settings.general') || hasPermission('settings.print') || hasPermission('settings.profile') || hasPermission('settings.users') || hasPermission('settings.roles') || hasPermission('settings.permissions') || hasPermission('settings.clients')) && (
             <NavItem to="/settings" label="Settings" icon={Settings} />
@@ -428,7 +430,7 @@ export const Layout = () => {
         </header>
 
         {/* Page Content */}
-        <div className="flex-1 overflow-auto p-4 md:p-6 relative">
+        <div className="flex-1 overflow-auto p-4 md:p-6 relative flex flex-col">
           <Outlet />
         </div>
       </main>
