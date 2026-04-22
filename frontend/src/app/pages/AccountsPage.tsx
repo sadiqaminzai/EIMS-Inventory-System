@@ -693,12 +693,17 @@ export const AccountsPage = () => {
     // --- Calculations ---
 
     // 1. Current Total Balances (Split by Currency) - derived from Accounts
+    const normalizeCurrency = (currency?: string) => {
+        const code = String(currency || '').trim().toUpperCase();
+        return code === 'AFN' ? 'AFN' : 'USD';
+    };
+
     const totalBalanceUSD = accounts
-        .filter(acc => acc.currency === 'USD')
+        .filter((acc) => normalizeCurrency(acc.currency) === 'USD')
         .reduce((sum, acc) => sum + acc.balance, 0);
-    
+
     const totalBalanceAFN = accounts
-        .filter(acc => acc.currency === 'AFN')
+        .filter((acc) => normalizeCurrency(acc.currency) === 'AFN')
         .reduce((sum, acc) => sum + acc.balance, 0);
 
     // 2. Filter Transactions by Date
@@ -713,21 +718,44 @@ export const AccountsPage = () => {
     const accountLedgerTransactions = filteredTransactions
         .filter((transaction) => transaction.type === 'Transfer' || isPaymentTransaction(transaction));
 
-    // 3. Calculate Income/Expenses from Filtered Transactions (Split by Currency)
+    // 3. Calculate Income/Expenses from Filtered Transactions by currency,
+    // excluding settlement entries (customer receipts/supplier payments).
+    const isReceivableSettlement = (transaction: Transaction) =>
+        transaction.type === 'Income' && transaction.category === 'Customer Receipts';
+
+    const isPayableSettlement = (transaction: Transaction) =>
+        transaction.type === 'Expense' && transaction.category === 'Supplier Payments';
+
     const incomeUSD = filteredTransactions
-        .filter(t => t.type === 'Income' && t.currency === 'USD')
+        .filter((t) => t.type === 'Income' && t.currency === 'USD' && !isReceivableSettlement(t))
         .reduce((sum, t) => sum + t.amount, 0);
 
     const incomeAFN = filteredTransactions
-        .filter(t => t.type === 'Income' && t.currency === 'AFN')
+        .filter((t) => t.type === 'Income' && t.currency === 'AFN' && !isReceivableSettlement(t))
         .reduce((sum, t) => sum + t.amount, 0);
 
     const expenseUSD = filteredTransactions
-        .filter(t => t.type === 'Expense' && t.currency === 'USD')
+        .filter((t) => t.type === 'Expense' && t.currency === 'USD' && !isPayableSettlement(t))
         .reduce((sum, t) => sum + t.amount, 0);
-    
+
     const expenseAFN = filteredTransactions
-        .filter(t => t.type === 'Expense' && t.currency === 'AFN')
+        .filter((t) => t.type === 'Expense' && t.currency === 'AFN' && !isPayableSettlement(t))
+        .reduce((sum, t) => sum + t.amount, 0);
+
+    const receivableUSD = filteredTransactions
+        .filter((t) => isReceivableSettlement(t) && t.currency === 'USD')
+        .reduce((sum, t) => sum + t.amount, 0);
+
+    const receivableAFN = filteredTransactions
+        .filter((t) => isReceivableSettlement(t) && t.currency === 'AFN')
+        .reduce((sum, t) => sum + t.amount, 0);
+
+    const payableUSD = filteredTransactions
+        .filter((t) => isPayableSettlement(t) && t.currency === 'USD')
+        .reduce((sum, t) => sum + t.amount, 0);
+
+    const payableAFN = filteredTransactions
+        .filter((t) => isPayableSettlement(t) && t.currency === 'AFN')
         .reduce((sum, t) => sum + t.amount, 0);
 
 
@@ -1002,13 +1030,16 @@ export const AccountsPage = () => {
                             <p className={clsx("text-xs font-medium", incomeAFN - expenseAFN >= 0 ? "text-green-600" : "text-red-600")}>
                                 ؋{(incomeAFN - expenseAFN).toLocaleString()}
                             </p>
+                            <p className="text-[10px] text-gray-500 mt-1">Excludes receivable/payable settlements</p>
                         </div>
                     </div>
                     <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                        <p className="text-xs font-semibold text-gray-500 uppercase">Total Expenses (This Month)</p>
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Receivable / Payable (This Month)</p>
                         <div className="mt-1">
-                            <p className="text-lg font-bold text-red-600">${expenseUSD.toLocaleString()}</p>
-                            <p className="text-xs font-medium text-red-600">؋{expenseAFN.toLocaleString()}</p>
+                            <p className="text-sm font-semibold text-emerald-600">Rec: ${receivableUSD.toLocaleString()}</p>
+                            <p className="text-sm font-semibold text-red-600">Pay: ${payableUSD.toLocaleString()}</p>
+                            <p className="text-xs font-medium text-emerald-600">Rec: ؋{receivableAFN.toLocaleString()}</p>
+                            <p className="text-xs font-medium text-red-600">Pay: ؋{payableAFN.toLocaleString()}</p>
                         </div>
                     </div>
                 </div>

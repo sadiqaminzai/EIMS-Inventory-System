@@ -106,7 +106,9 @@ export const TransactionForm = ({ initialData, paymentData, allowedTypesOverride
     });
 
     const type = watch('type');
+    const selectedAccountId = watch('account_id');
     const paymentType = watch('payment_type') === 'payable' ? 'payable' : 'receivable';
+    const selectedCurrency = String(watch('currency') || 'USD').toUpperCase() === 'AFN' ? 'AFN' : 'USD';
     const partyLabel = paymentType === 'payable' ? 'Supplier' : 'Customer';
     const invoiceLabel = paymentType === 'payable' ? 'Purchase Invoice' : 'Invoice';
     const typePermissions: Record<TransactionTypeOption, string> = {
@@ -142,6 +144,14 @@ export const TransactionForm = ({ initialData, paymentData, allowedTypesOverride
             }
         }
     }, [type, setValue, initialData, isPaymentEdit]);
+
+    useEffect(() => {
+        const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
+        if (!selectedAccount?.currency) return;
+
+        const accountCurrency = String(selectedAccount.currency).toUpperCase() === 'AFN' ? 'AFN' : 'USD';
+        setValue('currency', accountCurrency, { shouldDirty: true, shouldValidate: false });
+    }, [selectedAccountId, accounts, setValue]);
 
     useEffect(() => {
         if (initialData || isPaymentEdit) return;
@@ -203,6 +213,10 @@ export const TransactionForm = ({ initialData, paymentData, allowedTypesOverride
 
         sales
             .filter((sale) => sale.invoice_type === targetInvoiceType)
+            .filter((sale) => {
+                const invoiceCurrency = String((sale as any).currency || 'USD').toUpperCase() === 'AFN' ? 'AFN' : 'USD';
+                return invoiceCurrency === selectedCurrency;
+            })
             .forEach((sale) => {
                 const partyId = String(paymentType === 'payable' ? (sale.supplier_id || '') : (sale.customer_id || ''));
                 if (!partyId) return;
@@ -236,7 +250,7 @@ export const TransactionForm = ({ initialData, paymentData, allowedTypesOverride
         });
 
         return byParty;
-    }, [sales, paymentType]);
+    }, [sales, paymentType, selectedCurrency]);
 
     const pendingByParty = useMemo(() => {
         const pendingMap = new Map<string, number>();
@@ -357,6 +371,8 @@ export const TransactionForm = ({ initialData, paymentData, allowedTypesOverride
 
     const onSubmit = (data: any) => {
         if (data.type === 'Payment' && showPaymentMode) {
+            const selectedAccount = accounts.find((account) => String(account.id) === String(data.account_id));
+            const accountCurrency = String(selectedAccount?.currency || data.currency || 'USD').toUpperCase() === 'AFN' ? 'AFN' : 'USD';
             const details: Array<{
                 customer_id?: number;
                 supplier_id?: number;
@@ -451,7 +467,7 @@ export const TransactionForm = ({ initialData, paymentData, allowedTypesOverride
                 payment_type: paymentType,
                 date: data.date,
                 account_id: data.account_id,
-                currency: data.currency,
+                currency: accountCurrency,
                 salesman: data.salesman,
                 booker: data.booker,
                 notes: data.notes,
@@ -518,6 +534,7 @@ export const TransactionForm = ({ initialData, paymentData, allowedTypesOverride
                                 { value: 'USD', label: 'USD' },
                                 { value: 'AFN', label: 'AFN' }
                             ]}
+                            disabled
                             {...register('currency')} 
                         />
                         <DenseInput label="Salesman" {...register('salesman')} placeholder="e.g. Ahmad" />

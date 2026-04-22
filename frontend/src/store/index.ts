@@ -183,6 +183,7 @@ export interface Sale extends BaseEntity {
   invoice_no: string;
   customer_id: string;
   supplier_id?: string;
+  currency?: 'USD' | 'AFN';
   invoice_type?: 'sale' | 'purchase' | 'return_in' | 'return_out' | 'quotation';
   sale_date: string;
   items: SalesItem[];
@@ -1049,6 +1050,7 @@ export const useStore = create<AppState>((set, get) => ({
           invoice_no: o.serial_no ?? o.reference_number ?? '',
           customer_id: String(o.party_id ?? ''),
           supplier_id: '',
+          currency: (String(o.currency ?? 'USD').toUpperCase() === 'AFN' ? 'AFN' : 'USD') as 'USD' | 'AFN',
           invoice_type: 'sale' as const,
           sale_date: toDateInput(o.transaction_date ?? ''),
           items: (o.items ?? []).map((i: any) => ({
@@ -1081,6 +1083,7 @@ export const useStore = create<AppState>((set, get) => ({
             invoice_no: o.serial_no ?? o.reference_number ?? '',
             customer_id: '',
             supplier_id: String(o.party_id ?? ''),
+            currency: (String(o.currency ?? 'USD').toUpperCase() === 'AFN' ? 'AFN' : 'USD') as 'USD' | 'AFN',
             invoice_type: 'purchase' as const,
              sale_date: toDateInput(o.transaction_date ?? ''),
             items: (o.items ?? []).map((i: any) => ({
@@ -1113,6 +1116,7 @@ export const useStore = create<AppState>((set, get) => ({
             invoice_no: o.serial_no ?? o.reference_number ?? '',
             customer_id: String(o.party_id ?? ''),
             supplier_id: '',
+            currency: (String(o.currency ?? 'USD').toUpperCase() === 'AFN' ? 'AFN' : 'USD') as 'USD' | 'AFN',
             invoice_type: 'return_in' as const,
             sale_date: toDateInput(o.transaction_date ?? ''),
             items: (o.items ?? []).map((i: any) => ({
@@ -1145,6 +1149,7 @@ export const useStore = create<AppState>((set, get) => ({
             invoice_no: o.serial_no ?? o.reference_number ?? '',
             customer_id: '',
             supplier_id: String(o.party_id ?? ''),
+            currency: (String(o.currency ?? 'USD').toUpperCase() === 'AFN' ? 'AFN' : 'USD') as 'USD' | 'AFN',
             invoice_type: 'return_out' as const,
             sale_date: toDateInput(o.transaction_date ?? ''),
             items: (o.items ?? []).map((i: any) => ({
