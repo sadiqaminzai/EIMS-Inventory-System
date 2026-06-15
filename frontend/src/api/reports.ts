@@ -12,6 +12,7 @@ export interface ReportFilters {
   sort_by?: string;
   sort_dir?: 'asc' | 'desc';
   customer_id?: number;
+  supplier_id?: number;
   brand_id?: number;
   product_id?: number;
   batch_no?: string;
@@ -19,6 +20,10 @@ export interface ReportFilters {
   include_profit?: boolean;
   client_id?: string;
   show_only_positive_stock?: boolean;
+  show_only_expiry_date?: boolean;
+  show_with_cost_price?: boolean;
+  type?: string;
+  group_by?: string;
 }
 
 export interface ReportPagination {
@@ -125,7 +130,11 @@ const exportReport = async (endpoint: string, format: ReportFormat, filters?: Re
 const fetchAgingReport = async (endpoint: string, filters?: ReportFilters): Promise<ReportResponse> => {
   const as_of_date = filters?.to_date || filters?.from_date || undefined;
   const response = await apiClient.get(endpoint, {
-    params: normalizeParams({ as_of_date }),
+    params: normalizeParams({
+      as_of_date,
+      customer_id: filters?.customer_id,
+      supplier_id: filters?.supplier_id,
+    }),
   });
 
   const payload = response.data ?? {};
@@ -223,6 +232,15 @@ const fetchInvoiceSummary = async (
 };
 
 export const reportApi = {
+  invoiceSummary: (filters?: ReportFilters) => fetchReport('/reports/invoice-summary', filters),
+  invoiceSummaryExport: (format: ReportFormat, filters?: ReportFilters) => exportReport('/reports/invoice-summary/export', format, filters),
+  customerAnalysis: (filters?: ReportFilters) => fetchReport('/reports/customer-analysis', filters),
+  customerAnalysisExport: (format: ReportFormat, filters?: ReportFilters) => exportReport('/reports/customer-analysis/export', format, filters),
+  supplierAnalysis: (filters?: ReportFilters) => fetchReport('/reports/supplier-analysis', filters),
+  supplierAnalysisExport: (format: ReportFormat, filters?: ReportFilters) => exportReport('/reports/supplier-analysis/export', format, filters),
+  profitReport: (filters?: ReportFilters) => fetchReport('/reports/profit-analysis', filters),
+  profitReportExport: (format: ReportFormat, filters?: ReportFilters) => exportReport('/reports/profit-analysis/export', format, filters),
+
   customerWise: (filters?: ReportFilters) => fetchReport('/reports/customer-wise', filters),
   customerWiseExport: (format: ReportFormat, filters?: ReportFilters) => exportReport('/reports/customer-wise/export', format, filters),
   customerWiseInvoices: (customerId: number, filters?: ReportFilters) => fetchReport(`/reports/customer-wise/${customerId}/invoices`, filters),

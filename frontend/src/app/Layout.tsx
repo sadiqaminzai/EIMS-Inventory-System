@@ -1,5 +1,5 @@
 import { Outlet, useLocation, useNavigate } from 'react-router';
-import { useStore, Permission } from '../store/index';
+import { useStore, Permission, resolveAssetUrl } from '../store/index';
 import { 
   LayoutDashboard, 
   Package, 
@@ -22,7 +22,7 @@ import {
   Wallet,
   Save
 } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { clsx } from 'clsx';
 import { useIsMobile } from '../hooks/use-mobile';
 import { Button } from './components/ui/button';
@@ -79,6 +79,7 @@ export const Layout = () => {
         const profile = await authApi.getProfile();
         if (!active) return;
 
+        const resolvedAvatar = resolveAssetUrl((profile as any).avatar);
         updateCurrentUser({
           id: String(profile.id),
           name: profile.name,
@@ -88,6 +89,7 @@ export const Layout = () => {
           status: 'active',
           must_change_password: (profile as any).must_change_password ?? false,
           permissions: (profile as any).permissions ?? [],
+          ...(resolvedAvatar ? { avatar: resolvedAvatar } : {}),
         });
       } catch {
         // 401 handling and redirect are already centralized in api client interceptor.
@@ -262,6 +264,12 @@ export const Layout = () => {
     item.permissions.some((permission) => hasPermission(permission))
   );
 
+  // Dashboard is permissive: shown to everyone except roles explicitly granted
+  // 'dashboard.hide'. Checked directly (not via hasPermission) because superadmin
+  // passes every permission check, which would otherwise hide it from admins.
+  const isSuperAdminRole = currentUser.role?.toLowerCase() === 'superadmin';
+  const dashboardHidden = !isSuperAdminRole && (currentUser.permissions ?? []).includes('dashboard.hide');
+
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden font-sans">
       <Modal
@@ -353,7 +361,9 @@ export const Layout = () => {
 
         {/* Navigation */}
         <div className="flex-1 overflow-y-auto py-2 px-2 space-y-1 scrollbar-thin scrollbar-thumb-gray-200">
-          <NavItem to="/dashboard" label="Dashboard" icon={LayoutDashboard} />
+          {!dashboardHidden && (
+            <NavItem to="/dashboard" label="Dashboard" icon={LayoutDashboard} />
+          )}
           
           <NavItem to="/inventory" label="Inventory" icon={Package} perm="inventory.view" />
           <NavItem to="/partners" label="Partners" icon={Users} perm="partners.view" />
@@ -414,13 +424,11 @@ export const Layout = () => {
             )}
             <button 
               onClick={() => {
-                authApi.logout().catch(() => undefined).finally(() => {
-                  localStorage.removeItem('auth_token');
-                  localStorage.removeItem('tenant_id');
-                  localStorage.removeItem('current_user');
-                  toast.success('Logged out');
-                  navigate('/login');
-                });
+                localStorage.removeItem('auth_token');
+                localStorage.removeItem('tenant_id');
+                localStorage.removeItem('current_user');
+                toast.success('Logged out');
+                navigate('/login');
               }}
               className="text-gray-400 hover:text-red-600 transition-colors"
               title="Logout"
@@ -460,7 +468,9 @@ export const Layout = () => {
 
         {/* Page Content */}
         <div className="flex-1 overflow-auto p-4 md:p-6 relative flex flex-col">
-          <Outlet />
+          <Suspense fallback={<div className="flex flex-1 items-center justify-center py-20 text-sm text-gray-400">Loading…</div>}>
+            <Outlet />
+          </Suspense>
         </div>
       </main>
     </div>

@@ -15,7 +15,16 @@ import {
   type Product,
 } from '../../api';
 import { useStore } from '../../store';
+import {
+  buildReportHtmlDocument,
+  exportReportToPdf,
+  exportReportToXlsx,
+  toDataUrl,
+  type ReportExportModel,
+  type ReportSummaryCard,
+} from '../utils/reportExport';
 import { Modal } from '../components/ui/Modal';
+import { SearchableSelect } from '../components/ui/SearchableSelect';
 import { DEFAULT_REPORT_MODULE_KEY, REPORT_MODULE_MENU_ITEMS, type ReportModuleKey } from '../reports/reportMeta';
 
 type ReportKey =
@@ -37,7 +46,24 @@ type ReportKey =
   | 'invoice-sales-summary'
   | 'invoice-sales-return-summary'
   | 'invoice-quotation-summary'
-  | 'profit-analysis';
+  | 'invoice-party-summary'
+  | 'invoice-product-summary'
+  | 'invoice-batch-summary'
+  | 'invoice-date-summary'
+  | 'customer-invoice-report'
+  | 'customer-brand-report'
+  | 'customer-product-report'
+  | 'customer-profit-report'
+  | 'customer-date-report'
+  | 'supplier-invoice-report'
+  | 'supplier-product-report'
+  | 'supplier-batch-report'
+  | 'supplier-brand-report'
+  | 'supplier-date-report'
+  | 'profit-analysis'
+  | 'profit-invoice-report'
+  | 'profit-product-report'
+  | 'profit-batch-report';
 
 interface OptionItem {
   id: number;
@@ -50,6 +76,7 @@ interface FilterState {
   as_of_date: string;
   search: string;
   customer_id: string;
+  supplier_id: string;
   brand_id: string;
   product_id: string;
   batch_no: string;
@@ -85,6 +112,7 @@ interface ReportDefinition {
   dateFilter: 'none' | 'single' | 'range';
   filters: {
     customer: boolean;
+    supplier?: boolean;
     brand: boolean;
     product: boolean;
     batch: boolean;
@@ -105,6 +133,7 @@ const INITIAL_FILTERS: FilterState = {
   as_of_date: '',
   search: '',
   customer_id: '',
+  supplier_id: '',
   brand_id: '',
   product_id: '',
   batch_no: '',
@@ -268,6 +297,71 @@ const REPORT_DEFINITIONS: Record<ReportKey, ReportDefinition> = {
     fetch: reportApi.customerLedger,
     export: reportApi.customerLedgerExport,
   },
+  'customer-invoice-report': {
+    key: 'customer-invoice-report',
+    label: 'Customer Invoice Wise',
+    description: 'Customer invoices with debit, credit, due and payment status.',
+    chartType: 'bar',
+    defaultSortBy: 'invoice_date',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.customerAnalysis({ ...filters, group_by: 'invoice' }),
+    export: (format, filters) => reportApi.customerAnalysisExport(format, { ...filters, group_by: 'invoice' }),
+  },
+  'customer-brand-report': {
+    key: 'customer-brand-report',
+    label: 'Customer Brand Wise',
+    description: 'Customer sales grouped by brand.',
+    chartType: 'bar',
+    defaultSortBy: 'net_amount',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: true, brand: true, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.customerAnalysis({ ...filters, group_by: 'brand' }),
+    export: (format, filters) => reportApi.customerAnalysisExport(format, { ...filters, group_by: 'brand' }),
+  },
+  'customer-product-report': {
+    key: 'customer-product-report',
+    label: 'Customer Product Sales',
+    description: 'Customer sales grouped by product.',
+    chartType: 'bar',
+    defaultSortBy: 'net_amount',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: true, brand: true, product: true, batch: false, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.customerAnalysis({ ...filters, group_by: 'product' }),
+    export: (format, filters) => reportApi.customerAnalysisExport(format, { ...filters, group_by: 'product' }),
+  },
+  'customer-profit-report': {
+    key: 'customer-profit-report',
+    label: 'Customer Profit',
+    description: 'Customer sales profit from sale price minus product cost.',
+    chartType: 'bar',
+    defaultSortBy: 'profit_amount',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: true, brand: true, product: true, batch: false, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.customerAnalysis({ ...filters, group_by: 'profit' }),
+    export: (format, filters) => reportApi.customerAnalysisExport(format, { ...filters, group_by: 'profit' }),
+  },
+  'customer-date-report': {
+    key: 'customer-date-report',
+    label: 'Customer Date Wise',
+    description: 'Customer invoice totals grouped by date.',
+    chartType: 'line',
+    defaultSortBy: 'report_date',
+    defaultSortDir: 'asc',
+    dateFilter: 'range',
+    filters: { customer: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.customerAnalysis({ ...filters, group_by: 'date' }),
+    export: (format, filters) => reportApi.customerAnalysisExport(format, { ...filters, group_by: 'date' }),
+  },
   'customer-aging': {
     key: 'customer-aging',
     label: 'Customer Aging',
@@ -276,7 +370,7 @@ const REPORT_DEFINITIONS: Record<ReportKey, ReportDefinition> = {
     defaultSortBy: 'due_amount',
     defaultSortDir: 'desc',
     dateFilter: 'none',
-    filters: { customer: false, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    filters: { customer: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
     allowsDrilldown: false,
     supportsExport: false,
     fetch: reportApi.customerAging,
@@ -290,94 +384,245 @@ const REPORT_DEFINITIONS: Record<ReportKey, ReportDefinition> = {
     defaultSortBy: 'due_amount',
     defaultSortDir: 'desc',
     dateFilter: 'none',
-    filters: { customer: false, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    filters: { customer: false, supplier: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
     allowsDrilldown: false,
     supportsExport: false,
     fetch: reportApi.supplierAging,
     export: async () => Promise.reject(new Error('Export is not available for supplier aging report yet.')),
   },
+  'supplier-invoice-report': {
+    key: 'supplier-invoice-report',
+    label: 'Supplier Invoice Wise',
+    description: 'Supplier purchase and return invoices with paid and due values.',
+    chartType: 'bar',
+    defaultSortBy: 'invoice_date',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: false, supplier: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.supplierAnalysis({ ...filters, group_by: 'invoice' }),
+    export: (format, filters) => reportApi.supplierAnalysisExport(format, { ...filters, group_by: 'invoice' }),
+  },
+  'supplier-product-report': {
+    key: 'supplier-product-report',
+    label: 'Supplier Product Wise',
+    description: 'Supplier purchases grouped by product.',
+    chartType: 'bar',
+    defaultSortBy: 'net_amount',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: false, supplier: true, brand: true, product: true, batch: false, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.supplierAnalysis({ ...filters, group_by: 'product' }),
+    export: (format, filters) => reportApi.supplierAnalysisExport(format, { ...filters, group_by: 'product' }),
+  },
+  'supplier-batch-report': {
+    key: 'supplier-batch-report',
+    label: 'Supplier Batch Wise',
+    description: 'Supplier purchase quantity and value grouped by batch.',
+    chartType: 'bar',
+    defaultSortBy: 'net_amount',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: false, supplier: true, brand: true, product: true, batch: true, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.supplierAnalysis({ ...filters, group_by: 'batch' }),
+    export: (format, filters) => reportApi.supplierAnalysisExport(format, { ...filters, group_by: 'batch' }),
+  },
+  'supplier-brand-report': {
+    key: 'supplier-brand-report',
+    label: 'Supplier Brand Wise',
+    description: 'Supplier purchases grouped by brand.',
+    chartType: 'bar',
+    defaultSortBy: 'net_amount',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: false, supplier: true, brand: true, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.supplierAnalysis({ ...filters, group_by: 'brand' }),
+    export: (format, filters) => reportApi.supplierAnalysisExport(format, { ...filters, group_by: 'brand' }),
+  },
+  'supplier-date-report': {
+    key: 'supplier-date-report',
+    label: 'Supplier Date Wise',
+    description: 'Supplier invoice totals grouped by date.',
+    chartType: 'line',
+    defaultSortBy: 'report_date',
+    defaultSortDir: 'asc',
+    dateFilter: 'range',
+    filters: { customer: false, supplier: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.supplierAnalysis({ ...filters, group_by: 'date' }),
+    export: (format, filters) => reportApi.supplierAnalysisExport(format, { ...filters, group_by: 'date' }),
+  },
   'invoice-purchase-summary': {
     key: 'invoice-purchase-summary',
     label: 'Purchase Invoice Summary',
-    description: 'Purchase invoices summary report.',
+    description: 'Purchase invoices with supplier, paid, due, and payment status.',
     chartType: 'bar',
-    defaultSortBy: 'transaction_date',
+    defaultSortBy: 'invoice_date',
     defaultSortDir: 'desc',
     dateFilter: 'range',
-    filters: { customer: false, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    filters: { customer: false, supplier: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
     allowsDrilldown: false,
-    supportsExport: false,
-    fetch: reportApi.invoicePurchaseSummary,
-    export: async () => Promise.reject(new Error('Export is not available for invoice summary yet.')),
+    fetch: (filters) => reportApi.invoiceSummary({ ...filters, type: 'purchase', group_by: 'invoice' }),
+    export: (format, filters) => reportApi.invoiceSummaryExport(format, { ...filters, type: 'purchase', group_by: 'invoice' }),
   },
   'invoice-purchase-return-summary': {
     key: 'invoice-purchase-return-summary',
     label: 'Purchase Return Summary',
-    description: 'Purchase return invoices summary report.',
+    description: 'Purchase return invoices with supplier and settlement values.',
     chartType: 'bar',
-    defaultSortBy: 'transaction_date',
+    defaultSortBy: 'invoice_date',
     defaultSortDir: 'desc',
     dateFilter: 'range',
-    filters: { customer: false, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    filters: { customer: false, supplier: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
     allowsDrilldown: false,
-    supportsExport: false,
-    fetch: reportApi.invoicePurchaseReturnSummary,
-    export: async () => Promise.reject(new Error('Export is not available for invoice summary yet.')),
+    fetch: (filters) => reportApi.invoiceSummary({ ...filters, type: 'purchase_return', group_by: 'invoice' }),
+    export: (format, filters) => reportApi.invoiceSummaryExport(format, { ...filters, type: 'purchase_return', group_by: 'invoice' }),
   },
   'invoice-sales-summary': {
     key: 'invoice-sales-summary',
     label: 'Sales Summary',
-    description: 'Sales invoices summary report.',
+    description: 'Sales invoices with customer, paid, due, and payment status.',
     chartType: 'bar',
-    defaultSortBy: 'transaction_date',
+    defaultSortBy: 'invoice_date',
     defaultSortDir: 'desc',
     dateFilter: 'range',
-    filters: { customer: false, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    filters: { customer: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
     allowsDrilldown: false,
-    supportsExport: false,
-    fetch: reportApi.invoiceSalesSummary,
-    export: async () => Promise.reject(new Error('Export is not available for invoice summary yet.')),
+    fetch: (filters) => reportApi.invoiceSummary({ ...filters, type: 'sale', group_by: 'invoice' }),
+    export: (format, filters) => reportApi.invoiceSummaryExport(format, { ...filters, type: 'sale', group_by: 'invoice' }),
   },
   'invoice-sales-return-summary': {
     key: 'invoice-sales-return-summary',
     label: 'Sales Return Summary',
-    description: 'Sales return invoices summary report.',
+    description: 'Sales return invoices with customer and settlement values.',
     chartType: 'bar',
-    defaultSortBy: 'transaction_date',
+    defaultSortBy: 'invoice_date',
     defaultSortDir: 'desc',
     dateFilter: 'range',
-    filters: { customer: false, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    filters: { customer: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
     allowsDrilldown: false,
-    supportsExport: false,
-    fetch: reportApi.invoiceSalesReturnSummary,
-    export: async () => Promise.reject(new Error('Export is not available for invoice summary yet.')),
+    fetch: (filters) => reportApi.invoiceSummary({ ...filters, type: 'sales_return', group_by: 'invoice' }),
+    export: (format, filters) => reportApi.invoiceSummaryExport(format, { ...filters, type: 'sales_return', group_by: 'invoice' }),
   },
   'invoice-quotation-summary': {
     key: 'invoice-quotation-summary',
     label: 'Quotation Summary',
-    description: 'Quotation invoices summary report.',
+    description: 'Quotation records with customer and quoted value.',
     chartType: 'bar',
-    defaultSortBy: 'transaction_date',
+    defaultSortBy: 'invoice_date',
     defaultSortDir: 'desc',
     dateFilter: 'range',
-    filters: { customer: false, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    filters: { customer: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
     allowsDrilldown: false,
-    supportsExport: false,
-    fetch: reportApi.invoiceQuotationSummary,
-    export: async () => Promise.reject(new Error('Export is not available for invoice summary yet.')),
+    fetch: (filters) => reportApi.invoiceSummary({ ...filters, type: 'quotation', group_by: 'invoice' }),
+    export: (format, filters) => reportApi.invoiceSummaryExport(format, { ...filters, type: 'quotation', group_by: 'invoice' }),
+  },
+  'invoice-party-summary': {
+    key: 'invoice-party-summary',
+    label: 'Customer / Supplier Wise',
+    description: 'Invoice totals grouped by customer or supplier.',
+    chartType: 'bar',
+    defaultSortBy: 'net_amount',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: true, supplier: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.invoiceSummary({ ...filters, type: 'all', group_by: 'party' }),
+    export: (format, filters) => reportApi.invoiceSummaryExport(format, { ...filters, type: 'all', group_by: 'party' }),
+  },
+  'invoice-product-summary': {
+    key: 'invoice-product-summary',
+    label: 'Product Wise Invoice Summary',
+    description: 'Invoice value and quantity grouped by product.',
+    chartType: 'bar',
+    defaultSortBy: 'net_amount',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: true, supplier: true, brand: true, product: true, batch: false, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.invoiceSummary({ ...filters, type: 'all', group_by: 'product' }),
+    export: (format, filters) => reportApi.invoiceSummaryExport(format, { ...filters, type: 'all', group_by: 'product' }),
+  },
+  'invoice-batch-summary': {
+    key: 'invoice-batch-summary',
+    label: 'Batch Wise Invoice Summary',
+    description: 'Invoice value and quantity grouped by product batch.',
+    chartType: 'bar',
+    defaultSortBy: 'net_amount',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: true, supplier: true, brand: true, product: true, batch: true, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.invoiceSummary({ ...filters, type: 'all', group_by: 'batch' }),
+    export: (format, filters) => reportApi.invoiceSummaryExport(format, { ...filters, type: 'all', group_by: 'batch' }),
+  },
+  'invoice-date-summary': {
+    key: 'invoice-date-summary',
+    label: 'Date Wise Invoice Summary',
+    description: 'Invoice totals grouped by date.',
+    chartType: 'line',
+    defaultSortBy: 'report_date',
+    defaultSortDir: 'asc',
+    dateFilter: 'range',
+    filters: { customer: true, supplier: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: false },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.invoiceSummary({ ...filters, type: 'all', group_by: 'date' }),
+    export: (format, filters) => reportApi.invoiceSummaryExport(format, { ...filters, type: 'all', group_by: 'date' }),
   },
   'profit-analysis': {
     key: 'profit-analysis',
-    label: 'Profit',
-    description: 'Date wise profit analysis report.',
+    label: 'Date Wise Profit',
+    description: 'Date wise sales, cost, and profit.',
     chartType: 'line',
-    defaultSortBy: 'date',
+    defaultSortBy: 'report_date',
     defaultSortDir: 'asc',
     dateFilter: 'range',
-    filters: { customer: false, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: true },
+    filters: { customer: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: true },
     allowsDrilldown: false,
-    fetch: (filters) => reportApi.dateWiseSales({ ...filters, include_profit: true }),
-    export: (format, filters) => reportApi.dateWiseSalesExport(format, { ...filters, include_profit: true }),
+    fetch: (filters) => reportApi.profitReport({ ...filters, group_by: 'date' }),
+    export: (format, filters) => reportApi.profitReportExport(format, { ...filters, group_by: 'date' }),
+  },
+  'profit-invoice-report': {
+    key: 'profit-invoice-report',
+    label: 'Invoice Wise Profit',
+    description: 'Profit by sales invoice using sale price minus product cost.',
+    chartType: 'bar',
+    defaultSortBy: 'invoice_date',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: true, brand: false, product: false, batch: false, nearExpiry: false, includeProfit: true },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.profitReport({ ...filters, group_by: 'invoice' }),
+    export: (format, filters) => reportApi.profitReportExport(format, { ...filters, group_by: 'invoice' }),
+  },
+  'profit-product-report': {
+    key: 'profit-product-report',
+    label: 'Product Wise Profit',
+    description: 'Profit grouped by product and brand.',
+    chartType: 'bar',
+    defaultSortBy: 'profit_amount',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: true, brand: true, product: true, batch: false, nearExpiry: false, includeProfit: true },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.profitReport({ ...filters, group_by: 'product' }),
+    export: (format, filters) => reportApi.profitReportExport(format, { ...filters, group_by: 'product' }),
+  },
+  'profit-batch-report': {
+    key: 'profit-batch-report',
+    label: 'Batch Wise Profit',
+    description: 'Profit grouped by product batch.',
+    chartType: 'bar',
+    defaultSortBy: 'profit_amount',
+    defaultSortDir: 'desc',
+    dateFilter: 'range',
+    filters: { customer: true, brand: true, product: true, batch: true, nearExpiry: false, includeProfit: true },
+    allowsDrilldown: false,
+    fetch: (filters) => reportApi.profitReport({ ...filters, group_by: 'batch' }),
+    export: (format, filters) => reportApi.profitReportExport(format, { ...filters, group_by: 'batch' }),
   },
 };
 
@@ -422,20 +667,34 @@ const REPORT_MODULE_DEFINITIONS: ReportModuleDefinition[] = [
       { key: 'sales', label: 'Sales', reportKey: 'invoice-sales-summary' },
       { key: 'sales-return', label: 'Sales Return', reportKey: 'invoice-sales-return-summary' },
       { key: 'quotation', label: 'Quotation', reportKey: 'invoice-quotation-summary' },
+      { key: 'party-wise', label: 'Customer/Supplier Wise', reportKey: 'invoice-party-summary' },
+      { key: 'product-wise', label: 'Product Wise', reportKey: 'invoice-product-summary' },
+      { key: 'batch-wise', label: 'Batch Wise', reportKey: 'invoice-batch-summary' },
+      { key: 'date-wise', label: 'Date Wise', reportKey: 'invoice-date-summary' },
     ],
   },
   {
     key: 'customer',
     label: 'Customer Report (CR)',
     options: [
+      { key: 'invoice-wise', label: 'Invoice Wise', reportKey: 'customer-invoice-report' },
       { key: 'aging', label: 'Customer Aging', reportKey: 'customer-aging' },
       { key: 'ledger', label: 'Customer Ledger', reportKey: 'customer-ledger' },
+      { key: 'brand-wise', label: 'Brand Wise', reportKey: 'customer-brand-report' },
+      { key: 'product-sale', label: 'Product Sale', reportKey: 'customer-product-report' },
+      { key: 'profit', label: 'Profit', reportKey: 'customer-profit-report' },
+      { key: 'date-wise', label: 'Date Wise', reportKey: 'customer-date-report' },
     ],
   },
   {
     key: 'supplier',
     label: 'Supplier Report (SR)',
     options: [
+      { key: 'invoice-wise', label: 'Invoice Wise', reportKey: 'supplier-invoice-report' },
+      { key: 'product-wise', label: 'Product Wise', reportKey: 'supplier-product-report' },
+      { key: 'batch-wise', label: 'Batch Wise', reportKey: 'supplier-batch-report' },
+      { key: 'brand-wise', label: 'Brand Wise', reportKey: 'supplier-brand-report' },
+      { key: 'date-wise', label: 'Date Wise', reportKey: 'supplier-date-report' },
       { key: 'aging', label: 'Supplier Aging', reportKey: 'supplier-aging' },
     ],
   },
@@ -443,7 +702,10 @@ const REPORT_MODULE_DEFINITIONS: ReportModuleDefinition[] = [
     key: 'profit',
     label: 'Profit Analysis Report (PAR)',
     options: [
-      { key: 'analysis', label: 'Profit Analysis', reportKey: 'profit-analysis' },
+      { key: 'date-wise', label: 'Date Wise', reportKey: 'profit-analysis' },
+      { key: 'invoice-wise', label: 'Invoice Wise', reportKey: 'profit-invoice-report' },
+      { key: 'product-wise', label: 'Product Wise', reportKey: 'profit-product-report' },
+      { key: 'batch-wise', label: 'Batch Wise', reportKey: 'profit-batch-report' },
     ],
   },
 ];
@@ -498,7 +760,15 @@ const downloadBlob = (file: DownloadedReport) => {
 };
 
 export const ReportsPage = () => {
-  const { hasPermission, currentUser, tenant } = useStore();
+  const {
+    hasPermission,
+    currentUser,
+    tenant,
+    brands: bootstrapBrands,
+    products: bootstrapProducts,
+    customers,
+    suppliers,
+  } = useStore();
   const navigate = useNavigate();
   const { moduleKey } = useParams<{ moduleKey?: string }>();
   const [activeModuleKey, setActiveModuleKey] = useState<ReportModuleKey>(DEFAULT_REPORT_MODULE_KEY);
@@ -507,7 +777,7 @@ export const ReportsPage = () => {
   const [activeReportKey, setActiveReportKey] = useState<ReportKey>('available-stock');
   const [reportData, setReportData] = useState<ReportResponse>(EMPTY_REPORT);
   const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState<ReportFormat | null>(null);
+  const [exporting, setExporting] = useState<'pdf' | 'xlsx' | null>(null);
   const [brands, setBrands] = useState<BrandDto[]>([]);
   const [brandsLoading, setBrandsLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
@@ -530,16 +800,14 @@ export const ReportsPage = () => {
   const requestToken = useRef(0);
   const printRef = useRef<HTMLDivElement | null>(null);
 
-  const handlePrint = useCallback(() => {
-    try {
+  const buildExportModel = useCallback(async (): Promise<ReportExportModel> => {
       const companyName = tenant?.name || currentUser?.tenant_name || currentUser?.name || 'Company Name';
       const companyAddress = tenant?.address || '';
       const companyPhone = tenant?.phone || '';
       const companyEmail = tenant?.email || '';
-      const companyLogo = tenant?.logo || '';
+      const companyLogo = await toDataUrl(tenant?.logo || '');
       const reportTitle = REPORT_DEFINITIONS[activeReportKey]?.label ?? 'Report';
-      const printDate = new Date().toLocaleDateString();
-      const printableColumns = tableColumns;
+      const printDateTime = new Date().toLocaleString();
       const isLandscapePrint = activeReportKey === 'sales-and-stock';
       const totalItems = reportData.data.length;
 
@@ -617,142 +885,62 @@ export const ReportsPage = () => {
       if (appliedFilters.show_only_positive_stock) filters.push('Positive stock only');
       if (appliedFilters.search) filters.push(`Search: ${appliedFilters.search}`);
 
-      const escapeHtml = (value: string) => value
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+      const columns = tableColumns.map(([key, label]) => ({ key, label: String(label) }));
+      const rows = reportData.data.map((row) =>
+        tableColumns.map(([key]) => formatDisplayValue(key, (row as Record<string, unknown>)[key])),
+      );
 
-      const renderCellValue = (row: ReportRow, key: string) => {
-        return formatDisplayValue(key, (row as Record<string, unknown>)[key]);
+      const summaryCards: ReportSummaryCard[] = [];
+      if (activeReportKey === 'expiry-wise') {
+        summaryCards.push({ label: 'No. of Items', value: String(totalItems) });
+        if (appliedFilters.show_with_cost_price) {
+          summaryCards.push({ label: 'Total Amount in Cost Price', value: formatMoney(totalNetAvailableAmount) });
+        }
+        summaryCards.push({ label: 'Total Amount in Sale Price', value: formatMoney(totalNetStockSalesPrice) });
+      } else if (activeReportKey === 'available-stock') {
+        summaryCards.push(
+          { label: 'No. of Items', value: String(totalItems) },
+          { label: 'Available Quantity', value: String(totalAvailableQuantity) },
+          { label: 'Net Stock Amount (C.P)', value: formatMoney(totalNetAvailableAmount) },
+          { label: 'Net Stock Amount (S. P.)', value: formatMoney(totalNetStockSalesPrice) },
+        );
+      } else {
+        summaryCards.push(
+          { label: 'No. of Items', value: String(totalItems) },
+          { label: 'Opening Amount', value: formatMoney(totalOpeningAmount) },
+          { label: 'Purchase Amount', value: formatMoney(totalPurchaseAmount) },
+          { label: 'P. Return Amount', value: formatMoney(totalPurchaseReturnAmount) },
+          { label: 'Sale Amount', value: formatMoney(totalSaleAmount) },
+          { label: 'S. Return Amount', value: formatMoney(totalSalesReturnAmount) },
+          { label: 'Net Sales Amount', value: formatMoney(totalSalesNetAmount) },
+          { label: 'Net Stock Amount', value: formatMoney(totalClosingStockAmount) },
+        );
+      }
+
+      return {
+        company: {
+          name: companyName,
+          address: companyAddress,
+          phone: companyPhone,
+          email: companyEmail,
+          logo: companyLogo,
+        },
+        reportTitle,
+        printDateTime,
+        reportPeriod: reportPeriod || undefined,
+        filters,
+        columns,
+        rows,
+        summaryCards,
+        landscape: isLandscapePrint,
       };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenant, currentUser, brands, products, appliedFilters, activeReportKey, reportData]);
 
-      const html = `
-        <html>
-          <head>
-            <title>${reportTitle}</title>
-            <style>
-              @page { size: A4 ${isLandscapePrint ? 'landscape' : 'portrait'}; margin: 0; }
-              html, body { margin: 0; padding: 0; background: #fff; color: #111827; font-family: Arial, Helvetica, sans-serif; }
-              body { padding: 12mm; }
-              .page { width: 100%; }
-              .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 2px solid #111827; padding-bottom: 12px; margin-bottom: 10px; }
-              .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
-              .logo { width: 72px; height: 72px; object-fit: contain; }
-              .brand-info { border-left: 4px solid #111827; padding-left: 10px; min-width: 0; }
-              .company { font-size: 20px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.02em; line-height: 1.15; }
-              .meta { font-size: 12px; color: #374151; margin-top: 4px; }
-              .meta-line { font-size: 12px; color: #374151; margin-top: 4px; }
-              .contact-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-              .contact-chip { display: inline-block; padding: 3px 8px; border: 1px solid #d1d5db; border-radius: 999px; background: #f9fafb; font-size: 11px; color: #1f2937; }
-              .title { font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; text-align: right; }
-              .report-period { margin: 0 0 10px 0; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%); display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden; }
-              .period-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #4b5563; flex-shrink: 0; }
-              .period-value { font-size: 13px; font-weight: 600; color: #111827; text-overflow: ellipsis; overflow: hidden; }
-              .filters { margin: 0 0 12px 0; padding: 10px 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 12px; color: #374151; display: grid; gap: 4px; }
-              .summary { margin: 12px 0 0 0; display: flex; flex-direction: column; gap: 12px; }
-              .summary-row { display: grid; gap: 12px; }
-              .summary-row.columns-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-              .summary-row.columns-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-              .summary-row.columns-2-expiry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-              /* second/third rows should use the same 6-column layout so a single card matches first-row card width */
-              .summary-row.columns-2 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-              .summary-row.right-aligned .summary-card { grid-column: 6; }
-              .summary-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px 18px; background: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%); min-width: 0; }
-              .summary-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; white-space: nowrap; }
-              .summary-value { margin-top: 4px; font-size: 16px; font-weight: 700; color: #111827; white-space: nowrap; }
-              table { width: 100%; border-collapse: collapse; font-size: 12px; }
-              th, td { border: 1px solid #e5e7eb; padding: 6px 8px; text-align: left; }
-              th { background: #f3f4f6; font-weight: 700; text-transform: uppercase; }
-              tfoot td { font-weight: 700; background: #f9fafb; }
-              tr, td, th { page-break-inside: avoid; break-inside: avoid; }
-              thead { display: table-header-group; }
-              tfoot { display: table-footer-group; }
-            </style>
-          </head>
-          <body>
-            <div class="page">
-              <div class="header">
-                <div class="brand">
-                  ${companyLogo ? `<img class="logo" src="${escapeHtml(companyLogo)}" alt="Logo" />` : ''}
-                  <div class="brand-info">
-                    <div class="company">${escapeHtml(companyName)}</div>
-                    <div class="meta-line">${escapeHtml(companyAddress)}</div>
-                      ${companyPhone || companyEmail ? `<div class="contact-row">${companyPhone ? `<span class="contact-chip">Phone: ${escapeHtml(companyPhone)}</span>` : ''}${companyEmail ? `<span class="contact-chip">Email: ${escapeHtml(companyEmail)}</span>` : ''}</div>` : ''}
-                  </div>
-                </div>
-                <div>
-                  <div class="title">${escapeHtml(reportTitle)}</div>
-                  <div class="meta" style="text-align:right;">Print Date: ${escapeHtml(printDate)}</div>
-                </div>
-              </div>
-              ${reportPeriod ? `<div class="report-period"><span class="period-label">Report Period</span><span class="period-value">${escapeHtml(reportPeriod)}</span></div>` : ''}
-              ${filters.length ? `<div class="filters">${filters.map((item) => `<div>${escapeHtml(item)}</div>`).join('')}</div>` : ''}
-
-              <table>
-                <thead>
-                  <tr>
-                    ${printableColumns.map(([key, label]) => {
-                      const printableLabel = String(label);
-
-                      return `<th>${escapeHtml(printableLabel)}</th>`;
-                    }).join('')}
-                  </tr>
-                </thead>
-                <tbody>
-                  ${reportData.data.length === 0 ? `<tr><td colspan="${printableColumns.length}" style="text-align:center; font-style:italic; color:#6b7280; padding:16px;">No records found</td></tr>` : reportData.data.map((row) => `
-                    <tr>
-                      ${printableColumns.map(([key]) => `<td>${escapeHtml(renderCellValue(row, key))}</td>`).join('')}
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-
-              <div class="summary">
-                ${activeReportKey === 'expiry-wise' ? `
-                ${appliedFilters.show_with_cost_price ? `
-                <div class="summary-row columns-3">
-                  <div class="summary-card"><div class="summary-label">No. of Items</div><div class="summary-value">${totalItems}</div></div>
-                  <div class="summary-card"><div class="summary-label">Total Amount in Cost Price</div><div class="summary-value">${formatMoney(totalNetAvailableAmount)}</div></div>
-                  <div class="summary-card"><div class="summary-label">Total Amount in Sale Price</div><div class="summary-value">${formatMoney(totalNetStockSalesPrice)}</div></div>
-                </div>
-                ` : `
-                <div class="summary-row columns-2-expiry">
-                  <div class="summary-card"><div class="summary-label">No. of Items</div><div class="summary-value">${totalItems}</div></div>
-                  <div class="summary-card"><div class="summary-label">Total Amount in Sale Price</div><div class="summary-value">${formatMoney(totalNetStockSalesPrice)}</div></div>
-                </div>
-                `}
-                ` : activeReportKey === 'available-stock' ? `
-                <div class="summary-row columns-6">
-                  <div class="summary-card"><div class="summary-label">No. of Items</div><div class="summary-value">${totalItems}</div></div>
-                  <div class="summary-card"><div class="summary-label">Available Quantity</div><div class="summary-value">${totalAvailableQuantity}</div></div>
-                  <div class="summary-card"><div class="summary-label">Net Stock Amount (C.P)</div><div class="summary-value">${formatMoney(totalNetAvailableAmount)}</div></div>
-                  <div class="summary-card"><div class="summary-label">Net Stock Amount (S. P.)</div><div class="summary-value">${formatMoney(totalNetStockSalesPrice)}</div></div>
-                </div>
-                ` : `
-                <div class="summary-row columns-6">
-                  <div class="summary-card"><div class="summary-label">No. of Items</div><div class="summary-value">${totalItems}</div></div>
-                  <div class="summary-card"><div class="summary-label">Opening Amount</div><div class="summary-value">${formatMoney(totalOpeningAmount)}</div></div>
-                  <div class="summary-card"><div class="summary-label">Purchase Amount</div><div class="summary-value">${formatMoney(totalPurchaseAmount)}</div></div>
-                  <div class="summary-card"><div class="summary-label">P. Return Amount</div><div class="summary-value">${formatMoney(totalPurchaseReturnAmount)}</div></div>
-                  <div class="summary-card"><div class="summary-label">Sale Amount</div><div class="summary-value">${formatMoney(totalSaleAmount)}</div></div>
-                  <div class="summary-card"><div class="summary-label">S. Return Amount</div><div class="summary-value">${formatMoney(totalSalesReturnAmount)}</div></div>
-                </div>
-                <div class="summary-row columns-2 right-aligned">
-                  <div class="summary-card"><div class="summary-label">Net Sales Amount</div><div class="summary-value">${formatMoney(totalSalesNetAmount)}</div></div>
-                </div>
-                <div class="summary-row columns-2 right-aligned">
-                  <div class="summary-card"><div class="summary-label">Net Stock Amount</div><div class="summary-value">${formatMoney(totalClosingStockAmount)}</div></div>
-                </div>
-                `}
-              </div>
-
-            </div>
-          </body>
-        </html>
-      `;
-
+  const handlePrint = useCallback(async () => {
+    try {
+      const model = await buildExportModel();
+      const html = buildReportHtmlDocument(model);
       const newWin = window.open('', '_blank', 'width=900,height=700');
       if (!newWin) {
         toast.error('Unable to open print window');
@@ -762,17 +950,12 @@ export const ReportsPage = () => {
       newWin.document.write(html);
       newWin.document.close();
       newWin.focus();
-      // Give browser a moment to render before print
-      setTimeout(() => {
-        newWin.print();
-        // Optionally close the window after printing
-        // newWin.close();
-      }, 250);
+      setTimeout(() => newWin.print(), 250);
     } catch (err) {
       console.error(err);
       toast.error('Failed to print report');
     }
-  }, [tenant, brands, products, appliedFilters, activeReportKey, reportData.columns, reportData.data]);
+  }, [buildExportModel]);
 
   // Check if current user is super admin
   const isSuperAdmin = useMemo(() => {
@@ -797,6 +980,27 @@ export const ReportsPage = () => {
   );
 
   const activeReport = REPORT_DEFINITIONS[activeReportKey];
+  const moduleHasBrandDropdown = activeModule?.options.some((option) => option.type === 'dropdown' && option.key.includes('brand')) ?? false;
+  const moduleHasProductDropdown = activeModule?.options.some((option) => option.type === 'dropdown' && option.key.includes('product')) ?? false;
+  const brandOptions = useMemo(
+    () => [{ value: '', label: 'All Brands' }, ...brands.map((brand) => ({ value: String(brand.id), label: brand.name }))],
+    [brands],
+  );
+  const productOptions = useMemo(
+    () => [
+      { value: '', label: 'All Products' },
+      ...(activeReportKey === 'expiry-wise' ? expiryProducts : products).map((product) => ({ value: String(product.id), label: product.name })),
+    ],
+    [activeReportKey, expiryProducts, products],
+  );
+  const customerOptions = useMemo(
+    () => [{ value: '', label: 'All Customers' }, ...customers.map((customer) => ({ value: String(customer.id), label: customer.name }))],
+    [customers],
+  );
+  const supplierOptions = useMemo(
+    () => [{ value: '', label: 'All Suppliers' }, ...suppliers.map((supplier) => ({ value: String(supplier.id), label: supplier.name }))],
+    [suppliers],
+  );
 
   const canViewReports = visibleModules.length > 0;
 
@@ -819,6 +1023,18 @@ export const ReportsPage = () => {
       setActiveModuleKey(targetModule.key);
     }
   }, [activeModuleKey, canViewReports, moduleKey, navigate, visibleModules]);
+
+  useEffect(() => {
+    if (!activeModule) return;
+
+    const selectedOption = activeModule.options[0];
+    if (!selectedOption) return;
+
+    setSelectedOptions(new Set([selectedOption.key]));
+    setActiveOptionKey(selectedOption.key);
+    setActiveReportKey(selectedOption.reportKey);
+    setPage(1);
+  }, [activeModuleKey]);
 
   useEffect(() => {
     if (!activeModule) return;
@@ -867,6 +1083,14 @@ export const ReportsPage = () => {
   }, [activeReport.defaultSortBy, activeReport.defaultSortDir]);
 
   useEffect(() => {
+    if (bootstrapBrands.length > 0) {
+      setBrands(bootstrapBrands.map((brand) => ({
+        ...brand,
+        id: Number(brand.id),
+      })));
+      return;
+    }
+
     const fetchBrands = async () => {
       try {
         setBrandsLoading(true);
@@ -880,11 +1104,27 @@ export const ReportsPage = () => {
     };
 
     void fetchBrands();
-  }, []);
+  }, [bootstrapBrands]);
 
   // Load products for non-ESR reports based on selected brand
   useEffect(() => {
     if (activeReportKey === 'expiry-wise') {
+      return;
+    }
+
+    const brandId = appliedFilters.brand_id;
+    if (bootstrapProducts.length > 0) {
+      const nextProducts = bootstrapProducts
+        .filter((product) => !brandId || String(product.brand_id) === String(brandId))
+        .map((product) => ({
+          ...product,
+          id: Number(product.id),
+          category_id: product.category_id ? Number(product.category_id) : undefined,
+          brand_id: product.brand_id ? Number(product.brand_id) : undefined,
+          country_id: product.country_id ? Number(product.country_id) : undefined,
+          current_stock: product.stock_qty,
+        }));
+      setProducts(nextProducts);
       return;
     }
 
@@ -904,11 +1144,27 @@ export const ReportsPage = () => {
     };
 
     void loadProducts();
-  }, [activeReportKey, appliedFilters.brand_id]);
+  }, [activeReportKey, appliedFilters.brand_id, bootstrapProducts]);
 
   // ESR keeps its own product list so brand filtering stays local to expiry report only.
   useEffect(() => {
     if (activeReportKey !== 'expiry-wise') {
+      return;
+    }
+
+    const brandId = appliedFilters.brand_id;
+    if (bootstrapProducts.length > 0) {
+      const nextProducts = bootstrapProducts
+        .filter((product) => !brandId || String(product.brand_id) === String(brandId))
+        .map((product) => ({
+          ...product,
+          id: Number(product.id),
+          category_id: product.category_id ? Number(product.category_id) : undefined,
+          brand_id: product.brand_id ? Number(product.brand_id) : undefined,
+          country_id: product.country_id ? Number(product.country_id) : undefined,
+          current_stock: product.stock_qty,
+        }));
+      setExpiryProducts(nextProducts);
       return;
     }
 
@@ -927,7 +1183,7 @@ export const ReportsPage = () => {
     };
 
     void loadExpiryProducts(appliedFilters.brand_id || undefined);
-  }, [activeReportKey, appliedFilters.brand_id]);
+  }, [activeReportKey, appliedFilters.brand_id, bootstrapProducts]);
 
   const requestFilters = useMemo<ReportFilters>(() => {
     const filters: ReportFilters = {
@@ -949,6 +1205,10 @@ export const ReportsPage = () => {
 
     if (activeReport.filters.customer && appliedFilters.customer_id) {
       filters.customer_id = Number(appliedFilters.customer_id);
+    }
+
+    if (activeReport.filters.supplier && appliedFilters.supplier_id) {
+      filters.supplier_id = Number(appliedFilters.supplier_id);
     }
 
     if (activeReport.filters.brand && appliedFilters.brand_id) {
@@ -1035,19 +1295,29 @@ export const ReportsPage = () => {
     void loadReport();
   }, [canViewReports, loadReport]);
 
-  const handleExport = async (format: ReportFormat) => {
+  const handleExport = async (fmt: 'pdf' | 'xlsx') => {
     if (activeReport.supportsExport === false) {
       toast.error('Export is not available for this report.');
       return;
     }
 
-    setExporting(format);
+    setExporting(fmt);
 
     try {
-      const file = await activeReport.export(format, requestFilters);
-      downloadBlob(file);
-      toast.success(`${activeReport.label} ${format.toUpperCase()} exported`);
-    } catch {
+      const model = await buildExportModel();
+      const stamp = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const ts = `${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}-${pad(stamp.getHours())}${pad(stamp.getMinutes())}${pad(stamp.getSeconds())}`;
+      const base = (activeReport.label || 'report').replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'report';
+
+      if (fmt === 'pdf') {
+        await exportReportToPdf(model, `${base}-${ts}.pdf`);
+      } else {
+        await exportReportToXlsx(model, `${base}-${ts}.xlsx`);
+      }
+      toast.success(`${activeReport.label} ${fmt.toUpperCase()} exported`);
+    } catch (err) {
+      console.error(err);
       toast.error(`Failed to export ${activeReport.label.toLowerCase()} report`);
     } finally {
       setExporting(null);
@@ -1187,12 +1457,12 @@ export const ReportsPage = () => {
 
             <button
               type="button"
-              onClick={() => void handleExport('csv')}
+              onClick={() => void handleExport('xlsx')}
               className="inline-flex h-8 items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-medium text-blue-700 hover:bg-blue-100"
               disabled={!!exporting || activeReport.supportsExport === false}
             >
               <Download className="h-3.5 w-3.5" />
-              {exporting === 'csv' ? 'Exporting CSV...' : 'Export CSV'}
+              {exporting === 'xlsx' ? 'Exporting Excel...' : 'Export Excel'}
             </button>
 
             <button
@@ -1226,11 +1496,10 @@ export const ReportsPage = () => {
                       {activeModule.options.map((option) => {
                         if (option.type === 'dropdown' && option.key.includes('brand')) {
                           return (
-                            <select
+                            <SearchableSelect
                               key={option.key}
                               value={draftFilters.brand_id}
-                              onChange={async (e) => {
-                                const newBrandId = e.target.value;
+                              onChange={async (newBrandId) => {
                                 setDraftFilters((current) => ({ ...current, brand_id: newBrandId, product_id: '' }));
                                 setAppliedFilters((current) => ({ ...current, brand_id: newBrandId, product_id: '' }));
                                 setPage(1);
@@ -1264,27 +1533,22 @@ export const ReportsPage = () => {
                                   product_id: undefined,
                                 });
                               }}
-                              className="h-6 rounded border border-gray-300 px-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              options={brandOptions}
+                              placeholder="All Brands"
+                              className="w-44"
+                              width={260}
                               disabled={brandsLoading}
                               aria-label="Select Brand"
-                            >
-                              <option value="">All Brands</option>
-                              {brands.map((brand) => (
-                                <option key={brand.id} value={String(brand.id)}>
-                                  {brand.name}
-                                </option>
-                              ))}
-                            </select>
+                            />
                           );
                         }
 
                         if (option.type === 'dropdown' && option.key.includes('product')) {
                           return (
-                            <select
+                            <SearchableSelect
                               key={option.key}
                               value={draftFilters.product_id}
-                              onChange={(e) => {
-                                const newProductId = e.target.value;
+                              onChange={(newProductId) => {
                                 setDraftFilters((current) => ({ ...current, product_id: newProductId }));
                                 setAppliedFilters((current) => ({ ...current, product_id: newProductId }));
                                 setPage(1);
@@ -1294,17 +1558,13 @@ export const ReportsPage = () => {
                                   product_id: newProductId ? Number(newProductId) : undefined,
                                 });
                               }}
-                              className="h-6 rounded border border-gray-300 px-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              options={productOptions}
+                              placeholder="All Products"
+                              className="w-56"
+                              width={320}
                               disabled={activeReportKey === 'expiry-wise' ? expiryProductsLoading : productsLoading}
                               aria-label="Select Product"
-                            >
-                              <option value="">All Products</option>
-                              {(activeReportKey === 'expiry-wise' ? expiryProducts : products).map((product) => (
-                                <option key={product.id} value={String(product.id)}>
-                                  {product.name}
-                                </option>
-                              ))}
-                            </select>
+                            />
                           );
                         }
 
@@ -1360,30 +1620,80 @@ export const ReportsPage = () => {
                               type="checkbox"
                               checked={selectedOptions.has(option.key)}
                               onChange={() => {
-                                setSelectedOptions((prev) => {
-                                  const next = new Set(prev);
-                                  const isAll = option.key === 'all';
-
-                                  if (next.has(option.key)) {
-                                    next.delete(option.key);
-                                  } else {
-                                    if (isAll) {
-                                      next.clear();
-                                      next.add('all');
-                                    } else {
-                                      if (next.has('all')) next.delete('all');
-                                      next.add(option.key);
-                                    }
-                                  }
-
-                                  return next;
-                                });
+                                setSelectedOptions(new Set([option.key]));
+                                setActiveOptionKey(option.key);
+                                setActiveReportKey(option.reportKey);
+                                setPage(1);
                               }}
                             />
                             <span>{option.label}</span>
                           </label>
                         );
                       })}
+
+                      {activeReport.filters.customer && (
+                        <SearchableSelect
+                          value={draftFilters.customer_id}
+                          onChange={(newCustomerId) => {
+                            setDraftFilters((current) => ({ ...current, customer_id: newCustomerId }));
+                            setAppliedFilters((current) => ({ ...current, customer_id: newCustomerId }));
+                            setPage(1);
+                          }}
+                          options={customerOptions}
+                          placeholder="All Customers"
+                          className="w-52"
+                          width={300}
+                        />
+                      )}
+
+                      {activeReport.filters.supplier && (
+                        <SearchableSelect
+                          value={draftFilters.supplier_id}
+                          onChange={(newSupplierId) => {
+                            setDraftFilters((current) => ({ ...current, supplier_id: newSupplierId }));
+                            setAppliedFilters((current) => ({ ...current, supplier_id: newSupplierId }));
+                            setPage(1);
+                          }}
+                          options={supplierOptions}
+                          placeholder="All Suppliers"
+                          className="w-52"
+                          width={300}
+                        />
+                      )}
+
+                      {activeReport.filters.brand && !moduleHasBrandDropdown && (
+                        <SearchableSelect
+                          value={draftFilters.brand_id}
+                          onChange={(newBrandId) => {
+                            setDraftFilters((current) => ({ ...current, brand_id: newBrandId, product_id: '' }));
+                            setAppliedFilters((current) => ({ ...current, brand_id: newBrandId, product_id: '' }));
+                            setPage(1);
+                          }}
+                          options={brandOptions}
+                          placeholder="All Brands"
+                          className="w-44"
+                          width={260}
+                          disabled={brandsLoading}
+                          aria-label="Filter by brand"
+                        />
+                      )}
+
+                      {activeReport.filters.product && !moduleHasProductDropdown && (
+                        <SearchableSelect
+                          value={draftFilters.product_id}
+                          onChange={(newProductId) => {
+                            setDraftFilters((current) => ({ ...current, product_id: newProductId }));
+                            setAppliedFilters((current) => ({ ...current, product_id: newProductId }));
+                            setPage(1);
+                          }}
+                          options={productOptions}
+                          placeholder="All Products"
+                          className="w-56"
+                          width={320}
+                          disabled={activeReportKey === 'expiry-wise' ? expiryProductsLoading : productsLoading}
+                          aria-label="Filter by product"
+                        />
+                      )}
 
                       {activeReportKey !== 'expiry-wise' && (
                         <label className="inline-flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-1 py-0.5 text-xs hover:bg-white">

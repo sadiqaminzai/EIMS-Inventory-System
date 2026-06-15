@@ -1,9 +1,8 @@
 import { useState, useMemo, useEffect, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, Search, FileSpreadsheet, FileText, ArrowUpDown, ArrowUp, ArrowDown, PlusCircle } from 'lucide-react';
 import { clsx } from 'clsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import * as XLSX from 'xlsx';
+// jspdf / jspdf-autotable / xlsx are heavy and only needed on export, so they
+// are dynamically imported inside the handlers to keep table pages lightweight.
 
 interface Column<T> {
   header: string | ReactNode;
@@ -102,7 +101,8 @@ export const DenseTable = <T extends object>({
   const allowExportPdf = canExportPdf ?? canExport;
 
   // Export to Excel
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
+    const XLSX = await import('xlsx');
     const ws = XLSX.utils.json_to_sheet(sortedData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Data");
@@ -110,7 +110,11 @@ export const DenseTable = <T extends object>({
   };
 
   // Export to PDF
-  const exportToPDF = () => {
+  const exportToPDF = async () => {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ]);
     const doc = new jsPDF();
     const tableColumn = columns.map(c => typeof c.header === 'string' ? c.header : '');
     const tableRows = sortedData.map(item => {

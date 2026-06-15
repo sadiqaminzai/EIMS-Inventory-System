@@ -88,40 +88,42 @@ export const REPORT_MENU_ITEMS: ReportMenuItem[] = [
 
 export const DEFAULT_REPORT_MODULE_KEY: ReportModuleKey = 'available-stock';
 
+// Each report module is gated by its own unique permission. 'report.view' is an
+// optional master grant that unlocks every report at once.
 export const REPORT_MODULE_MENU_ITEMS: ReportModuleMenuItem[] = [
   {
     key: 'available-stock',
     label: 'Available Stock',
-    permissions: ['manage_inventory', 'inventory.view', 'report.view', 'reports.view'],
+    permissions: ['report.available_stock', 'report.view'],
   },
   {
     key: 'sales-and-stock',
     label: 'Sales and Stock',
-    permissions: ['manage_inventory', 'inventory.view', 'manage_orders', 'sales.view', 'invoices.view', 'report.view', 'reports.view'],
+    permissions: ['report.sales_and_stock', 'report.view'],
   },
   {
     key: 'expiry-report',
     label: 'Expiry Report',
-    permissions: ['manage_inventory', 'inventory.view', 'purchase.view', 'report.view', 'reports.view'],
+    permissions: ['report.expiry', 'report.view'],
   },
   {
     key: 'invoice-summary',
     label: 'Invoice Summary',
-    permissions: ['manage_inventory', 'purchase.view', 'manage_orders', 'sales.view', 'invoices.view', 'report.view', 'reports.view'],
+    permissions: ['report.invoice_summary', 'report.view'],
   },
   {
     key: 'customer',
     label: 'Customer',
-    permissions: ['manage_orders', 'sales.view', 'invoices.view', 'customer.view', 'report.view', 'reports.view'],
+    permissions: ['report.customer', 'report.view'],
   },
   {
     key: 'supplier',
     label: 'Supplier',
-    permissions: ['manage_inventory', 'purchase.view', 'supplier.view', 'report.view', 'reports.view'],
+    permissions: ['report.supplier', 'report.view'],
   },
   {
     key: 'profit',
     label: 'Profit',
-    permissions: ['manage_orders', 'sales.view', 'invoices.view', 'report.view', 'reports.view'],
+    permissions: ['report.profit', 'report.view'],
   },
 ];

@@ -15,6 +15,8 @@ import { accountTransactionApi } from '../api/accountTransactions';
 import { settingsApi } from '../api/settings';
 import { transactionApi } from '../api/transactions';
 import { paymentApi } from '../api/payments';
+import { bootstrapApi } from '../api/bootstrap';
+import { ASSET_BASE_URL } from '../api/client';
 
 // --- Types ---
 
@@ -442,11 +444,12 @@ const INITIAL_USER: User = {
 
 const mapRoleFromBackend = (role?: string): Role => role ?? '';
 
-const resolveAssetUrl = (value?: string | null) => {
+export const resolveAssetUrl = (value?: string | null) => {
   if (!value) return undefined;
   if (value.startsWith('data:image/')) return value;
-  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
-  const assetBase = apiBase.replace(/\/api\/v1\/?$/, '');
+  // Use the same base resolution as the API client so media works in production
+  // (where VITE_API_URL is usually unset) instead of falling back to localhost.
+  const assetBase = ASSET_BASE_URL;
   if (value.startsWith('http://localhost:8000http://localhost/')) {
     return value.replace('http://localhost:8000http://localhost', assetBase);
   }
@@ -521,6 +524,14 @@ const buildAccountTransactionPayload = (data: Partial<Transaction>): Record<stri
 // --- Permissions Logic ---
 const INITIAL_PERMISSIONS_MAP: Record<string, Permission[]> = {};
 const DEFAULT_PERMISSIONS: Permission[] = [
+  // Dashboard & Reports
+  'dashboard.view',   // assignable; informational (dashboard is permissive by default)
+  'dashboard.hide',   // when granted to a role, hides the dashboard from that role
+  'report.view', 'report.export', 'report.print', // 'report.view' = master grant for all reports
+  // Per-report access (each sidebar report has its own permission)
+  'report.available_stock', 'report.sales_and_stock', 'report.expiry',
+  'report.invoice_summary', 'report.customer', 'report.supplier', 'report.profit',
+
   // Inventory main + sub modules
   'inventory.view',
   'partners.view',
@@ -555,6 +566,39 @@ const DEFAULT_PERMISSIONS: Permission[] = [
 ];
 
 let bootstrapRequestCounter = 0;
+
+const allSettledWithConcurrency = async <T>(
+  tasks: Array<() => Promise<T>>,
+  limit: number,
+): Promise<PromiseSettledResult<T>[]> => {
+  const results: PromiseSettledResult<T>[] = new Array(tasks.length);
+  let nextIndex = 0;
+
+  const runNext = async () => {
+    const index = nextIndex;
+    nextIndex += 1;
+
+    if (index >= tasks.length) {
+      return;
+    }
+
+    try {
+      results[index] = { status: 'fulfilled', value: await tasks[index]() };
+    } catch (reason) {
+      results[index] = { status: 'rejected', reason };
+    }
+
+    await runNext();
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, tasks.length) }, () => runNext()),
+  );
+
+  return results;
+};
+
+const fulfilled = <T>(value: T): PromiseFulfilledResult<T> => ({ status: 'fulfilled', value });
 
 export const useStore = create<AppState>((set, get) => ({
   currentUser: INITIAL_USER,
@@ -644,21 +688,21 @@ export const useStore = create<AppState>((set, get) => ({
 
       // Base requests that all authenticated users can access
       const baseRequests = [
-        settingsApi.getTenantProfile(),
-        settingsApi.getPrintSettings(),
-        brandApi.list(),
-        categoryApi.list(),
-        countryApi.list(),
-        inventoryApi.getProducts(),
-        supplierApi.list(),
-        customerApi.list(),
-        accountApi.list(),
-        accountTransactionApi.list(),
-        transactionApi.getHistory({ type: 'purchase' }),
-        transactionApi.getHistory({ type: 'sale' }),
-        transactionApi.getHistory({ type: 'return_in' }),
-        transactionApi.getHistory({ type: 'return_out' }),
-        transactionApi.getHistory({ type: 'quotation' }),
+        () => settingsApi.getTenantProfile(),
+        () => settingsApi.getPrintSettings(),
+        () => brandApi.list(),
+        () => categoryApi.list(),
+        () => countryApi.list(),
+        () => inventoryApi.getProducts(),
+        () => supplierApi.list(),
+        () => customerApi.list(),
+        () => accountApi.list(),
+        () => accountTransactionApi.list(),
+        () => transactionApi.getHistory({ type: 'purchase' }),
+        () => transactionApi.getHistory({ type: 'sale' }),
+        () => transactionApi.getHistory({ type: 'return_in' }),
+        () => transactionApi.getHistory({ type: 'return_out' }),
+        () => transactionApi.getHistory({ type: 'quotation' }),
       ];
 
       const baseLabels = [
@@ -682,14 +726,14 @@ export const useStore = create<AppState>((set, get) => ({
       const currentPermissions = get().currentUser.permissions ?? [];
       const canViewUsers = isSuperAdmin || currentPermissions.includes('user.view') || currentPermissions.includes('manage_users');
 
-      const userRequests = canViewUsers ? [userApi.list()] : [];
+      const userRequests = canViewUsers ? [() => userApi.list()] : [];
       const userLabels = canViewUsers ? ['Users'] : [];
 
       // Admin-only requests (roles, permissions, clients)
       const adminRequests = isSuperAdmin ? [
-        roleApi.list(),
-        permissionApi.list(),
-        tenantApi.list(),
+        () => roleApi.list(),
+        () => permissionApi.list(),
+        () => tenantApi.list(),
       ] : [];
 
       const adminLabels = isSuperAdmin ? [
@@ -701,7 +745,36 @@ export const useStore = create<AppState>((set, get) => ({
       const requests = [...baseRequests, ...userRequests, ...adminRequests];
       const labels = [...baseLabels, ...userLabels, ...adminLabels];
 
-      const results = await Promise.allSettled(requests);
+      let results: PromiseSettledResult<any>[];
+
+      try {
+        const bootstrap = await bootstrapApi.get();
+        results = [
+          fulfilled(bootstrap.tenant),
+          fulfilled(bootstrap.printSettings),
+          fulfilled(bootstrap.brands),
+          fulfilled(bootstrap.categories),
+          fulfilled(bootstrap.countries),
+          fulfilled(bootstrap.products),
+          fulfilled(bootstrap.suppliers),
+          fulfilled(bootstrap.customers),
+          fulfilled(bootstrap.accounts),
+          fulfilled(bootstrap.transactions),
+          fulfilled({ data: bootstrap.purchases }),
+          fulfilled({ data: bootstrap.sales }),
+          fulfilled({ data: bootstrap.returns }),
+          fulfilled({ data: bootstrap.returnOuts }),
+          fulfilled({ data: bootstrap.quotations }),
+          ...(canViewUsers ? [fulfilled(bootstrap.users)] : []),
+          ...(isSuperAdmin ? [
+            fulfilled(bootstrap.roles),
+            fulfilled(bootstrap.permissions),
+            fulfilled(bootstrap.clients),
+          ] : []),
+        ];
+      } catch {
+        results = await allSettledWithConcurrency(requests, 4);
+      }
 
       // Ignore stale responses from older bootstrap runs.
       if (bootstrapRequestId !== bootstrapRequestCounter) {
@@ -720,8 +793,13 @@ export const useStore = create<AppState>((set, get) => ({
         if (result.status === 'rejected') {
           const reason = result.reason;
           // Don't show toast for expected auth/permission responses.
-          if (reason?.response?.status !== 401 && reason?.response?.status !== 403) {
-            console.error(`Failed to load ${labels[index]}`, reason);
+          const status = reason?.response?.status;
+          const authWasCleared = !localStorage.getItem('auth_token') || window.__eimsAuthRedirecting;
+          if (!authWasCleared && status !== 401 && status !== 403) {
+            console.error(
+              `Failed to load ${labels[index]} (${status ?? reason?.code ?? 'unknown'} ${reason?.config?.url ?? ''})`,
+              reason,
+            );
             nonAuthFailures.push(labels[index]);
           }
         }

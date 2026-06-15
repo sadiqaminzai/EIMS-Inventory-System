@@ -32,6 +32,7 @@ Route::prefix('v1')->middleware(['api'])->group(function () {
     Route::middleware(['auth:sanctum', 'tenant'])->group(function () {
         Route::post('/auth/logout', [AuthController::class, 'logout']);
         Route::get('/user', [AuthController::class, 'profile']);
+        Route::get('/bootstrap', [\App\Http\Controllers\Api\V1\BootstrapController::class, 'show']);
         Route::put('/profile', [ProfileController::class, 'update']);
 
         Route::get('/settings/print', [PrintSettingsController::class, 'show']);
@@ -144,6 +145,15 @@ Route::prefix('v1')->middleware(['api'])->group(function () {
         Route::get('/reports/customer-wise/export', [ReportController::class, 'customerWiseExport'])->middleware('permission:manage_orders|sales.view|invoices.view|report.view|reports.view');
         Route::get('/reports/customer-wise/{customerId}/invoices', [ReportController::class, 'customerWiseInvoices'])->middleware('permission:manage_orders|sales.view|invoices.view|report.view|reports.view');
         Route::get('/reports/customer-wise/{customerId}/invoices/export', [ReportController::class, 'customerWiseInvoicesExport'])->middleware('permission:manage_orders|sales.view|invoices.view|report.view|reports.view');
+
+        Route::get('/reports/invoice-summary', [ReportController::class, 'invoiceSummary'])->middleware('permission:manage_inventory|purchase.view|manage_orders|sales.view|invoices.view|report.view|reports.view');
+        Route::get('/reports/invoice-summary/export', [ReportController::class, 'invoiceSummaryExport'])->middleware('permission:manage_inventory|purchase.view|manage_orders|sales.view|invoices.view|report.view|reports.view');
+        Route::get('/reports/customer-analysis', [ReportController::class, 'customerBusiness'])->middleware('permission:manage_orders|sales.view|invoices.view|customer.view|report.view|reports.view');
+        Route::get('/reports/customer-analysis/export', [ReportController::class, 'customerBusinessExport'])->middleware('permission:manage_orders|sales.view|invoices.view|customer.view|report.view|reports.view');
+        Route::get('/reports/supplier-analysis', [ReportController::class, 'supplierBusiness'])->middleware('permission:manage_inventory|purchase.view|supplier.view|report.view|reports.view');
+        Route::get('/reports/supplier-analysis/export', [ReportController::class, 'supplierBusinessExport'])->middleware('permission:manage_inventory|purchase.view|supplier.view|report.view|reports.view');
+        Route::get('/reports/profit-analysis', [ReportController::class, 'profitBusiness'])->middleware('permission:manage_orders|sales.view|invoices.view|report.view|reports.view');
+        Route::get('/reports/profit-analysis/export', [ReportController::class, 'profitBusinessExport'])->middleware('permission:manage_orders|sales.view|invoices.view|report.view|reports.view');
 
         Route::get('/reports/brand-wise', [ReportController::class, 'brandWise'])->middleware('permission:manage_orders|sales.view|invoices.view|manage_products|brand.view|report.view|reports.view');
         Route::get('/reports/brand-wise/export', [ReportController::class, 'brandWiseExport'])->middleware('permission:manage_orders|sales.view|invoices.view|manage_products|brand.view|report.view|reports.view');

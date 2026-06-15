@@ -1060,6 +1060,14 @@ const RoleForm = ({ initialData, initialPermissions, onSave, onCancel }: { initi
 
     const mainPanels = [
         {
+            key: 'reports',
+            label: 'Dashboard & Reports',
+            groups: [
+                { key: 'dashboard', label: 'Dashboard' },
+                { key: 'report', label: 'Reports' },
+            ],
+        },
+        {
             key: 'inventory',
             label: 'Inventory',
             groups: [

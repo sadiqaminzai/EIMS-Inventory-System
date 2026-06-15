@@ -25,6 +25,8 @@ export interface SearchableSelectProps {
   modal?: boolean
   width?: string | number
   triggerId?: string
+  disabled?: boolean
+  'aria-label'?: string
 }
 
 export function SearchableSelect({
@@ -37,7 +39,9 @@ export function SearchableSelect({
   className,
   modal = false,
   width = "200px",
-  triggerId
+  triggerId,
+  disabled = false,
+  'aria-label': ariaLabel
 }: SearchableSelectProps) {
   const [open, setOpen] = React.useState(false)
   const [search, setSearch] = React.useState("")
@@ -77,6 +81,8 @@ export function SearchableSelect({
             aria-expanded={open}
             type="button"
             id={triggerId}
+            disabled={disabled}
+            aria-label={ariaLabel ?? placeholder}
             className={cn(
               "w-full justify-between h-7 text-xs px-2 font-normal border-gray-300 hover:bg-white focus:ring-1 focus:ring-blue-500 bg-white",
               !hasValue && "text-muted-foreground",

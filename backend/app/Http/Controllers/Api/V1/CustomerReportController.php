@@ -14,6 +14,7 @@ class CustomerReportController extends Controller
     {
         $data = $request->validate([
             'as_of_date' => ['nullable', 'date'],
+            'customer_id' => ['nullable', 'integer'],
         ]);
 
         $asOfDate = isset($data['as_of_date'])
@@ -24,6 +25,9 @@ class CustomerReportController extends Controller
             ->where('transaction_type', 'sale')
             ->where('party_type', Customer::class)
             ->where('due_amount', '>', 0)
+            ->when(!empty($data['customer_id']), function ($query) use ($data): void {
+                $query->where('party_id', (int) $data['customer_id']);
+            })
             ->orderBy('transaction_date')
             ->get(['id', 'serial_no', 'party_id', 'transaction_date', 'net_amount', 'paid_amount', 'due_amount']);
 

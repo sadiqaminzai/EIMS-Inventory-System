@@ -28,6 +28,118 @@ class ReportController extends Controller
         return $this->jsonReportResponse($this->reportService->customerWise($filters));
     }
 
+    public function invoiceSummary(Request $request)
+    {
+        $filters = $request->validate(array_merge($this->baseRules(), [
+            'type' => ['nullable', 'string', 'max:50'],
+            'group_by' => ['nullable', 'in:invoice,party,product,batch,date'],
+            'product_id' => ['nullable', 'integer'],
+            'brand_id' => ['nullable', 'integer'],
+            'customer_id' => ['nullable', 'integer'],
+            'supplier_id' => ['nullable', 'integer'],
+        ]));
+
+        return $this->jsonReportResponse($this->reportService->invoiceSummary($filters));
+    }
+
+    public function invoiceSummaryExport(Request $request)
+    {
+        $filters = $request->validate(array_merge($this->baseRules(), [
+            'type' => ['nullable', 'string', 'max:50'],
+            'group_by' => ['nullable', 'in:invoice,party,product,batch,date'],
+            'product_id' => ['nullable', 'integer'],
+            'brand_id' => ['nullable', 'integer'],
+            'customer_id' => ['nullable', 'integer'],
+            'supplier_id' => ['nullable', 'integer'],
+            'format' => ['nullable', 'in:csv,pdf'],
+        ]));
+
+        return $this->exportReport('Invoice Summary Report', $filters, function (array $params) {
+            return $this->reportService->invoiceSummary($params, true);
+        });
+    }
+
+    public function customerBusiness(Request $request)
+    {
+        $filters = $request->validate(array_merge($this->baseRules(), [
+            'group_by' => ['nullable', 'in:invoice,product,batch,brand,date,profit'],
+            'product_id' => ['nullable', 'integer'],
+            'brand_id' => ['nullable', 'integer'],
+            'customer_id' => ['nullable', 'integer'],
+        ]));
+
+        return $this->jsonReportResponse($this->reportService->customerBusiness($filters));
+    }
+
+    public function customerBusinessExport(Request $request)
+    {
+        $filters = $request->validate(array_merge($this->baseRules(), [
+            'group_by' => ['nullable', 'in:invoice,product,batch,brand,date,profit'],
+            'product_id' => ['nullable', 'integer'],
+            'brand_id' => ['nullable', 'integer'],
+            'customer_id' => ['nullable', 'integer'],
+            'format' => ['nullable', 'in:csv,pdf'],
+        ]));
+
+        return $this->exportReport('Customer Report', $filters, function (array $params) {
+            return $this->reportService->customerBusiness($params, true);
+        });
+    }
+
+    public function supplierBusiness(Request $request)
+    {
+        $filters = $request->validate(array_merge($this->baseRules(), [
+            'group_by' => ['nullable', 'in:invoice,product,batch,brand,date'],
+            'product_id' => ['nullable', 'integer'],
+            'brand_id' => ['nullable', 'integer'],
+            'supplier_id' => ['nullable', 'integer'],
+        ]));
+
+        return $this->jsonReportResponse($this->reportService->supplierBusiness($filters));
+    }
+
+    public function supplierBusinessExport(Request $request)
+    {
+        $filters = $request->validate(array_merge($this->baseRules(), [
+            'group_by' => ['nullable', 'in:invoice,product,batch,brand,date'],
+            'product_id' => ['nullable', 'integer'],
+            'brand_id' => ['nullable', 'integer'],
+            'supplier_id' => ['nullable', 'integer'],
+            'format' => ['nullable', 'in:csv,pdf'],
+        ]));
+
+        return $this->exportReport('Supplier Report', $filters, function (array $params) {
+            return $this->reportService->supplierBusiness($params, true);
+        });
+    }
+
+    public function profitBusiness(Request $request)
+    {
+        $filters = $request->validate(array_merge($this->baseRules(), [
+            'group_by' => ['nullable', 'in:invoice,product,batch,date'],
+            'product_id' => ['nullable', 'integer'],
+            'brand_id' => ['nullable', 'integer'],
+            'customer_id' => ['nullable', 'integer'],
+        ]));
+
+        return $this->jsonReportResponse($this->reportService->profitBusiness($filters));
+    }
+
+    public function profitBusinessExport(Request $request)
+    {
+        $filters = $request->validate(array_merge($this->baseRules(), [
+            'group_by' => ['nullable', 'in:invoice,product,batch,date'],
+            'product_id' => ['nullable', 'integer'],
+            'brand_id' => ['nullable', 'integer'],
+            'customer_id' => ['nullable', 'integer'],
+            'format' => ['nullable', 'in:csv,pdf'],
+        ]));
+
+        return $this->exportReport('Profit Report', $filters, function (array $params) {
+            return $this->reportService->profitBusiness($params, true);
+        });
+    }
+
     public function customerWiseExport(Request $request)
     {
         $filters = $request->validate(array_merge($this->baseRules(), [

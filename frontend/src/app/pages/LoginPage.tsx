@@ -41,6 +41,7 @@ export const LoginPage = () => {
     } catch (error: any) {
       localStorage.removeItem('auth_token');
       localStorage.removeItem('tenant_id');
+      localStorage.removeItem('current_user');
       const status = error?.response?.status;
       const backendMessage = error?.response?.data?.message;
       if (status === 401) {
