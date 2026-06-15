@@ -27,6 +27,7 @@ interface DenseTableProps<T> {
   canExportPdf?: boolean;
   defaultSort?: { key: keyof T; direction: 'asc' | 'desc' };
   headerAfterSearch?: React.ReactNode;
+  tableContainerClassName?: string;
 }
 
 export const DenseTable = <T extends object>({
@@ -42,7 +43,8 @@ export const DenseTable = <T extends object>({
   canExportExcel,
   canExportPdf,
   defaultSort,
-  headerAfterSearch
+  headerAfterSearch,
+  tableContainerClassName
 }: DenseTableProps<T>) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -173,7 +175,7 @@ export const DenseTable = <T extends object>({
       </div>
 
       {/* Table Area */}
-      <div className="overflow-x-auto overflow-y-visible">
+      <div className={clsx("overflow-x-auto overflow-y-visible", tableContainerClassName)}>
         <table className="w-full text-left border-collapse">
           <thead className="bg-gray-100 sticky top-0 z-10 text-xs font-semibold text-gray-600 uppercase">
             <tr>

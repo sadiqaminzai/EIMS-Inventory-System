@@ -69,10 +69,11 @@ class ReportExportService
         }, $rows);
 
         $pdf = SimplePdfBuilder::table($reportName, array_values($columns), $preparedRows);
+        $contentDisposition = 'attachment; filename="'.$filename.'"; filename*=UTF-8\'' . rawurlencode($filename);
 
         return response($pdf, 200, [
             'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            'Content-Disposition' => $contentDisposition,
         ]);
     }
 

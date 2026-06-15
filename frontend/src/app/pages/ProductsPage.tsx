@@ -409,6 +409,7 @@ export const ProductsPage = () => {
             )}
           </div>
         }
+        tableContainerClassName="max-h-[55vh] overflow-y-auto"
         defaultSort={{ key: 'created_at', direction: 'desc' }}
       />
       

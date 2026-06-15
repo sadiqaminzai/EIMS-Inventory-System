@@ -165,6 +165,8 @@ Route::prefix('v1')->middleware(['api'])->group(function () {
 
         Route::get('/reports/sales-and-stock', [ReportController::class, 'salesAndStock'])->middleware('permission:manage_inventory|inventory.view|manage_orders|sales.view|invoices.view|report.view|reports.view');
         Route::get('/reports/sales-and-stock/export', [ReportController::class, 'salesAndStockExport'])->middleware('permission:manage_inventory|inventory.view|manage_orders|sales.view|invoices.view|report.view|reports.view');
+        Route::get('/reports/sales-and-stock-batch-wise', [ReportController::class, 'salesAndStockBatchWise'])->middleware('permission:manage_inventory|inventory.view|manage_orders|sales.view|invoices.view|report.view|reports.view');
+        Route::get('/reports/sales-and-stock-batch-wise/export', [ReportController::class, 'salesAndStockBatchWiseExport'])->middleware('permission:manage_inventory|inventory.view|manage_orders|sales.view|invoices.view|report.view|reports.view');
 
         Route::get('/reports/available-stock', [ReportController::class, 'availableStock'])->middleware('permission:manage_inventory|inventory.view|report.view|reports.view');
         Route::get('/reports/available-stock/export', [ReportController::class, 'availableStockExport'])->middleware('permission:manage_inventory|inventory.view|report.view|reports.view');

@@ -31,6 +31,10 @@ class ProductController extends Controller
             });
         }
 
+        if ($request->filled('brand_id')) {
+            $query->where('products.brand_id', (int) $request->input('brand_id'));
+        }
+
         $items = $query->paginate(50);
 
         $items->getCollection()->transform(function ($product) {

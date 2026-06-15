@@ -5,6 +5,7 @@ export type ReportFormat = 'csv' | 'pdf';
 export interface ReportFilters {
   from_date?: string;
   to_date?: string;
+  as_of_date?: string;
   page?: number;
   per_page?: number;
   search?: string;
@@ -16,6 +17,8 @@ export interface ReportFilters {
   batch_no?: string;
   near_expiry_days?: number;
   include_profit?: boolean;
+  client_id?: string;
+  show_only_positive_stock?: boolean;
 }
 
 export interface ReportPagination {
@@ -44,6 +47,25 @@ export interface DownloadedReport {
   filename: string;
   blob: Blob;
   mimeType: string;
+}
+
+interface PagedResponse<T> {
+  data: T[];
+  current_page: number;
+  per_page: number;
+  total: number;
+  last_page: number;
+}
+
+interface InvoiceHistoryRow {
+  id: number;
+  serial_no?: string;
+  transaction_date?: string;
+  transaction_type?: string;
+  party_id?: number;
+  net_amount?: number;
+  paid_amount?: number;
+  due_amount?: number;
 }
 
 const normalizeParams = (params?: Record<string, unknown>) => {
@@ -100,6 +122,106 @@ const exportReport = async (endpoint: string, format: ReportFormat, filters?: Re
   };
 };
 
+const fetchAgingReport = async (endpoint: string, filters?: ReportFilters): Promise<ReportResponse> => {
+  const as_of_date = filters?.to_date || filters?.from_date || undefined;
+  const response = await apiClient.get(endpoint, {
+    params: normalizeParams({ as_of_date }),
+  });
+
+  const payload = response.data ?? {};
+  const data: ReportRow[] = Array.isArray(payload.orders) ? payload.orders : [];
+  const columns = data[0]
+    ? Object.keys(data[0]).reduce<Record<string, string>>((acc, key) => {
+      acc[key] = key.replace(/_/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase());
+      return acc;
+    }, {})
+    : {};
+
+  return {
+    data,
+    summary: payload.summary ?? {},
+    columns,
+    charts: null,
+    pagination: null,
+  };
+};
+
+const fetchInvoiceSummary = async (
+  type: 'purchase' | 'return_out' | 'sale' | 'return_in' | 'quotation',
+  filters?: ReportFilters,
+): Promise<ReportResponse> => {
+  const response = await apiClient.get<PagedResponse<InvoiceHistoryRow>>('/transactions', {
+    params: normalizeParams({
+      type,
+      page: filters?.page,
+    }),
+  });
+
+  const payload = response.data;
+  const sourceRows = Array.isArray(payload?.data) ? payload.data : [];
+  const normalizedRows = sourceRows
+    .filter((row) => {
+      if (filters?.from_date && row.transaction_date && row.transaction_date < filters.from_date) {
+        return false;
+      }
+      if (filters?.to_date && row.transaction_date && row.transaction_date > filters.to_date) {
+        return false;
+      }
+      if (filters?.search) {
+        const search = filters.search.toLowerCase();
+        return [row.serial_no, row.transaction_type, String(row.party_id ?? '')]
+          .some((value) => String(value ?? '').toLowerCase().includes(search));
+      }
+      return true;
+    })
+    .map((row) => ({
+      invoice_no: row.serial_no ?? `INV-${row.id}`,
+      transaction_date: row.transaction_date ?? '',
+      transaction_type: row.transaction_type ?? type,
+      party_id: Number(row.party_id ?? 0),
+      net_amount: Number(row.net_amount ?? 0),
+      paid_amount: Number(row.paid_amount ?? 0),
+      due_amount: Number(row.due_amount ?? 0),
+    }));
+
+  const summary = normalizedRows.reduce(
+    (acc, row) => {
+      acc.total_invoices += 1;
+      acc.total_net_amount += Number(row.net_amount ?? 0);
+      acc.total_paid_amount += Number(row.paid_amount ?? 0);
+      acc.total_due_amount += Number(row.due_amount ?? 0);
+      return acc;
+    },
+    { total_invoices: 0, total_net_amount: 0, total_paid_amount: 0, total_due_amount: 0 },
+  );
+
+  return {
+    data: normalizedRows,
+    summary,
+    columns: {
+      invoice_no: 'Invoice No',
+      transaction_date: 'Date',
+      transaction_type: 'Type',
+      party_id: 'Party ID',
+      net_amount: 'Net Amount',
+      paid_amount: 'Paid Amount',
+      due_amount: 'Due Amount',
+    },
+    charts: {
+      x_key: 'invoice_no',
+      y_key: 'net_amount',
+    },
+    pagination: payload
+      ? {
+        current_page: Number(payload.current_page ?? 1),
+        per_page: Number(payload.per_page ?? (normalizedRows.length || 1)),
+        total: Number(payload.total ?? normalizedRows.length),
+        last_page: Number(payload.last_page ?? 1),
+      }
+      : null,
+  };
+};
+
 export const reportApi = {
   customerWise: (filters?: ReportFilters) => fetchReport('/reports/customer-wise', filters),
   customerWiseExport: (format: ReportFormat, filters?: ReportFilters) => exportReport('/reports/customer-wise/export', format, filters),
@@ -126,10 +248,21 @@ export const reportApi = {
 
   salesAndStock: (filters?: ReportFilters) => fetchReport('/reports/sales-and-stock', filters),
   salesAndStockExport: (format: ReportFormat, filters?: ReportFilters) => exportReport('/reports/sales-and-stock/export', format, filters),
+  salesAndStockBatchWise: (filters?: ReportFilters) => fetchReport('/reports/sales-and-stock-batch-wise', filters),
+  salesAndStockBatchWiseExport: (format: ReportFormat, filters?: ReportFilters) => exportReport('/reports/sales-and-stock-batch-wise/export', format, filters),
 
   availableStock: (filters?: ReportFilters) => fetchReport('/reports/available-stock', filters),
   availableStockExport: (format: ReportFormat, filters?: ReportFilters) => exportReport('/reports/available-stock/export', format, filters),
 
   customerLedger: (filters?: ReportFilters) => fetchReport('/reports/customer-ledger', filters),
   customerLedgerExport: (format: ReportFormat, filters?: ReportFilters) => exportReport('/reports/customer-ledger/export', format, filters),
+
+  customerAging: (filters?: ReportFilters) => fetchAgingReport('/reports/customer-aging', filters),
+  supplierAging: (filters?: ReportFilters) => fetchAgingReport('/reports/supplier-aging', filters),
+
+  invoicePurchaseSummary: (filters?: ReportFilters) => fetchInvoiceSummary('purchase', filters),
+  invoicePurchaseReturnSummary: (filters?: ReportFilters) => fetchInvoiceSummary('return_out', filters),
+  invoiceSalesSummary: (filters?: ReportFilters) => fetchInvoiceSummary('sale', filters),
+  invoiceSalesReturnSummary: (filters?: ReportFilters) => fetchInvoiceSummary('return_in', filters),
+  invoiceQuotationSummary: (filters?: ReportFilters) => fetchInvoiceSummary('quotation', filters),
 };

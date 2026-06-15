@@ -212,6 +212,10 @@ class InventoryReportService
             $query->where('products.id', (int) $filters['product_id']);
         }
 
+        if (!empty($filters['brand_id'])) {
+            $query->where('products.brand_id', (int) $filters['brand_id']);
+        }
+
         if (!empty($filters['search'])) {
             $search = (string) $filters['search'];
             $query->where('products.name', 'like', "%{$search}%");
@@ -252,18 +256,50 @@ class InventoryReportService
 
     public function batchWise(array $filters, bool $forExport = false): array
     {
+        $asOfDate = !empty($filters['as_of_date'])
+            ? Carbon::parse((string) $filters['as_of_date'])->toDateString()
+            : null;
+
+        $movementSubquery = DB::table('inventory_logs')
+            ->join('order_items', 'order_items.id', '=', 'inventory_logs.order_item_id')
+            ->join('orders', 'orders.id', '=', 'order_items.order_id')
+            ->where('inventory_logs.tenant_id', $this->tenantId())
+            ->where('orders.tenant_id', $this->tenantId())
+            ->when($asOfDate !== null, function ($builder) use ($asOfDate): void {
+                $builder->whereDate('orders.transaction_date', '<=', $asOfDate);
+            })
+            ->selectRaw('inventory_logs.batch_id as batch_id')
+            ->selectRaw("COALESCE(SUM(CASE WHEN inventory_logs.transaction_type = 'in' THEN inventory_logs.quantity_change ELSE 0 END), 0) as purchase_qty")
+            ->selectRaw("COALESCE(SUM(CASE WHEN inventory_logs.transaction_type = 'out' THEN ABS(inventory_logs.quantity_change) ELSE 0 END), 0) as sold_qty")
+            ->selectRaw("COALESCE(SUM(inventory_logs.quantity_change), 0) as remaining_qty")
+            ->groupBy('inventory_logs.batch_id');
+
         $query = DB::table('inventory_batches')
             ->join('products', 'products.id', '=', 'inventory_batches.product_id')
+            ->leftJoinSub($movementSubquery, 'movement_rows', function ($join): void {
+                $join->on('movement_rows.batch_id', '=', 'inventory_batches.id');
+            })
+            ->where('inventory_batches.tenant_id', $this->tenantId())
+            ->where('products.tenant_id', $this->tenantId())
             ->selectRaw('products.id as product_id')
             ->selectRaw('products.name as product_name')
             ->selectRaw("COALESCE(inventory_batches.batch_no, '-') as batch_number")
-            ->selectRaw('COALESCE(SUM(inventory_batches.quantity_initial), 0) as purchase_qty')
-            ->selectRaw('COALESCE(SUM(CASE WHEN inventory_batches.quantity_initial > inventory_batches.quantity_remaining THEN inventory_batches.quantity_initial - inventory_batches.quantity_remaining ELSE 0 END), 0) as sold_qty')
-            ->selectRaw('COALESCE(SUM(inventory_batches.quantity_remaining), 0) as remaining_qty')
+            ->selectRaw('COALESCE(SUM(movement_rows.remaining_qty), 0) as available_quantity')
+            ->selectRaw('COALESCE(MAX(inventory_batches.cost_price), 0) as cost_price')
+            ->selectRaw('COALESCE(MAX(products.sale_price), 0) as sale_price')
+            ->selectRaw('(COALESCE(MAX(inventory_batches.cost_price), 0) * COALESCE(SUM(movement_rows.remaining_qty), 0)) as net_amount')
             ->groupBy('products.id', 'products.name', 'inventory_batches.batch_no');
+
+        if (!empty($filters['show_only_positive_stock'])) {
+            $query->havingRaw('COALESCE(SUM(movement_rows.remaining_qty), 0) > 0');
+        }
 
         if (!empty($filters['product_id'])) {
             $query->where('products.id', (int) $filters['product_id']);
+        }
+
+        if (!empty($filters['brand_id'])) {
+            $query->where('products.brand_id', (int) $filters['brand_id']);
         }
 
         if (!empty($filters['batch_no'])) {
@@ -281,16 +317,16 @@ class InventoryReportService
         $this->applySorting($query, $filters, [
             'product_name' => 'product_name',
             'batch_number' => 'batch_number',
-            'purchase_qty' => 'purchase_qty',
-            'sold_qty' => 'sold_qty',
-            'remaining_qty' => 'remaining_qty',
-        ], 'remaining_qty', 'desc');
+            'available_quantity' => 'available_quantity',
+            'cost_price' => 'cost_price',
+            'sale_price' => 'sale_price',
+            'net_amount' => 'net_amount',
+        ], 'available_quantity', 'desc');
 
         $summary = DB::query()->fromSub(clone $query, 'batch_rows')
             ->selectRaw('COUNT(*) as total_batches')
-            ->selectRaw('COALESCE(SUM(purchase_qty), 0) as purchase_qty')
-            ->selectRaw('COALESCE(SUM(sold_qty), 0) as sold_qty')
-            ->selectRaw('COALESCE(SUM(remaining_qty), 0) as remaining_qty')
+            ->selectRaw('COALESCE(SUM(available_quantity), 0) as available_quantity')
+            ->selectRaw('COALESCE(SUM(net_amount), 0) as net_amount')
             ->first();
 
         $rows = $this->paginateOrCollect($query, $filters, $forExport);
@@ -299,15 +335,15 @@ class InventoryReportService
             'columns' => [
                 'product_name' => 'Product Name',
                 'batch_number' => 'Batch Number',
-                'purchase_qty' => 'Purchase Qty',
-                'sold_qty' => 'Sold Qty',
-                'remaining_qty' => 'Remaining Qty',
+                'available_quantity' => 'Available Quantity',
+                'cost_price' => 'Cost Price',
+                'sale_price' => 'Sale Price',
+                'net_amount' => 'Net Amount',
             ],
             'summary' => [
                 'total_batches' => (int) ($summary->total_batches ?? 0),
-                'purchase_qty' => (float) ($summary->purchase_qty ?? 0),
-                'sold_qty' => (float) ($summary->sold_qty ?? 0),
-                'remaining_qty' => (float) ($summary->remaining_qty ?? 0),
+                'available_quantity' => (float) ($summary->available_quantity ?? 0),
+                'net_amount' => (float) ($summary->net_amount ?? 0),
             ],
             'rows' => $rows,
         ];
@@ -318,28 +354,54 @@ class InventoryReportService
         $nearExpiryDays = isset($filters['near_expiry_days']) ? max(1, (int) $filters['near_expiry_days']) : 30;
         $hasDateRange = !empty($filters['from_date']) || !empty($filters['to_date']);
 
-        $query = DB::table('inventory_batches')
+        $baseQuery = DB::table('inventory_batches')
             ->join('products', 'products.id', '=', 'inventory_batches.product_id')
-            ->where('inventory_batches.quantity_remaining', '>', 0)
+            ->where('inventory_batches.tenant_id', $this->tenantId())
+            ->where('products.tenant_id', $this->tenantId())
             ->selectRaw('products.id as product_id')
             ->selectRaw('products.name as product_name')
-            ->selectRaw("COALESCE(inventory_batches.batch_no, '-') as batch_number")
-            ->selectRaw('inventory_batches.expiry_date as expiry_date')
-            ->selectRaw('COALESCE(inventory_batches.quantity_remaining, 0) as remaining_quantity');
+            ->selectRaw('COALESCE(products.cost_price, 0) as cost_price')
+            ->selectRaw('COALESCE(products.sale_price, 0) as sale_price')
+            ->selectRaw('products.brand_id as brand_id')
+            ->selectRaw('inventory_batches.batch_no as batch_number')
+            ->selectRaw('MIN(inventory_batches.expiry_date) as expiry_date')
+            ->selectRaw('COALESCE(SUM(inventory_batches.quantity_remaining), 0) as remaining_quantity')
+            ->groupBy('products.id', 'products.name', 'products.cost_price', 'products.sale_price', 'products.brand_id', 'inventory_batches.batch_no');
+
+        $query = DB::query()->fromSub($baseQuery, 'expiry_rows');
 
         if ($hasDateRange) {
-            $query->whereNotNull('inventory_batches.expiry_date');
-            $this->applyDateRange($query, 'inventory_batches.expiry_date', [
+            $query->whereNotNull('expiry_date');
+            $this->applyDateRange($query, 'expiry_date', [
                 'from_date' => $filters['from_date'] ?? null,
                 'to_date' => $filters['to_date'] ?? null,
             ]);
         }
 
+        if (!empty($filters['show_only_expiry_date'])) {
+            $query->whereNotNull('expiry_date');
+        }
+
+        // ESR should only show available stock rows.
+        $query->where('remaining_quantity', '>', 0);
+
+        if (!empty($filters['product_id'])) {
+            $query->where('product_id', (int) $filters['product_id']);
+        }
+
+        if (!empty($filters['brand_id'])) {
+            $query->where('brand_id', (int) $filters['brand_id']);
+        }
+
+        if (!empty($filters['batch_no'])) {
+            $query->where('batch_number', 'like', '%'.(string) $filters['batch_no'].'%');
+        }
+
         if (!empty($filters['search'])) {
             $search = (string) $filters['search'];
             $query->where(function ($builder) use ($search): void {
-                $builder->where('products.name', 'like', "%{$search}%")
-                    ->orWhere('inventory_batches.batch_no', 'like', "%{$search}%");
+                $builder->where('product_name', 'like', "%{$search}%")
+                    ->orWhere('batch_number', 'like', "%{$search}%");
             });
         }
 
@@ -360,6 +422,8 @@ class InventoryReportService
             return [
                 'product_id' => (int) ($row->product_id ?? 0),
                 'product_name' => (string) ($row->product_name ?? ''),
+                'cost_price' => (float) ($row->cost_price ?? 0),
+                'sale_price' => (float) ($row->sale_price ?? 0),
                 'batch_number' => (string) ($row->batch_number ?? '-'),
                 'expiry_date' => $expiryDate?->toDateString(),
                 'remaining_quantity' => (float) ($row->remaining_quantity ?? 0),
@@ -380,6 +444,8 @@ class InventoryReportService
             'total_batches' => $rowCollection->count(),
             'near_expiry_batches' => $rowCollection->where('is_near_expiry', true)->count(),
             'remaining_quantity' => (float) $rowCollection->sum('remaining_quantity'),
+            'total_cost_amount' => (float) $rowCollection->sum(fn ($row) => (float) ($row['remaining_quantity'] ?? 0) * (float) ($row['cost_price'] ?? 0)),
+            'total_sale_amount' => (float) $rowCollection->sum(fn ($row) => (float) ($row['remaining_quantity'] ?? 0) * (float) ($row['sale_price'] ?? 0)),
             'near_expiry_days' => $nearExpiryDays,
         ];
 
@@ -399,17 +465,55 @@ class InventoryReportService
 
     public function productBatchWise(array $filters, bool $forExport = false): array
     {
+        $asOfDate = !empty($filters['as_of_date'])
+            ? Carbon::parse((string) $filters['as_of_date'])->toDateString()
+            : null;
+
+        $movementSubquery = DB::table('inventory_logs')
+            ->join('order_items', 'order_items.id', '=', 'inventory_logs.order_item_id')
+            ->join('orders', 'orders.id', '=', 'order_items.order_id')
+            ->where('inventory_logs.tenant_id', $this->tenantId())
+            ->where('orders.tenant_id', $this->tenantId())
+            ->when($asOfDate !== null, function ($builder) use ($asOfDate): void {
+                $builder->whereDate('orders.transaction_date', '<=', $asOfDate);
+            })
+            ->selectRaw('inventory_logs.batch_id as batch_id')
+            ->selectRaw("COALESCE(SUM(inventory_logs.quantity_change), 0) as stock_remaining")
+            ->groupBy('inventory_logs.batch_id');
+
         $query = DB::table('inventory_batches')
             ->join('products', 'products.id', '=', 'inventory_batches.product_id')
+            ->leftJoinSub($movementSubquery, 'movement_rows', function ($join): void {
+                $join->on('movement_rows.batch_id', '=', 'inventory_batches.id');
+            })
+            ->where('inventory_batches.tenant_id', $this->tenantId())
+            ->where('products.tenant_id', $this->tenantId())
             ->selectRaw('products.id as product_id')
             ->selectRaw('products.name as product_name')
             ->selectRaw("COALESCE(inventory_batches.batch_no, '-') as batch_number")
-            ->selectRaw('COALESCE(inventory_batches.cost_price, 0) as purchase_price')
-            ->selectRaw('COALESCE(products.sale_price, 0) as sale_price')
-            ->selectRaw('COALESCE(inventory_batches.quantity_remaining, 0) as stock_remaining');
+            ->selectRaw('COALESCE(MAX(inventory_batches.cost_price), 0) as cost_price')
+            ->selectRaw('COALESCE(MAX(products.sale_price), 0) as sale_price')
+            ->selectRaw('COALESCE(movement_rows.stock_remaining, 0) as available_quantity')
+            ->selectRaw('(COALESCE(MAX(inventory_batches.cost_price), 0) * COALESCE(movement_rows.stock_remaining, 0)) as net_amount');
+
+        // Filter out zero stock items if requested
+        if (!empty($filters['show_only_positive_stock'])) {
+            $query->havingRaw(
+                'COALESCE(opening_stock, 0) > 0
+                 OR COALESCE(purchased, 0) > 0
+                 OR COALESCE(purchase_return, 0) > 0
+                 OR COALESCE(sold, 0) > 0
+                 OR COALESCE(sales_return, 0) > 0
+                 OR COALESCE(closing_stock, 0) > 0'
+            );
+        }
 
         if (!empty($filters['product_id'])) {
             $query->where('products.id', (int) $filters['product_id']);
+        }
+
+        if (!empty($filters['brand_id'])) {
+            $query->where('products.brand_id', (int) $filters['brand_id']);
         }
 
         if (!empty($filters['batch_no'])) {
@@ -427,10 +531,11 @@ class InventoryReportService
         $this->applySorting($query, $filters, [
             'product_name' => 'product_name',
             'batch_number' => 'batch_number',
-            'purchase_price' => 'purchase_price',
+            'cost_price' => 'cost_price',
             'sale_price' => 'sale_price',
-            'stock_remaining' => 'stock_remaining',
-        ], 'stock_remaining', 'desc');
+            'available_quantity' => 'available_quantity',
+            'net_amount' => 'net_amount',
+        ], 'available_quantity', 'desc');
 
         $rows = $this->paginateOrCollect($query, $filters, $forExport);
 
@@ -440,13 +545,15 @@ class InventoryReportService
             'columns' => [
                 'product_name' => 'Product Name',
                 'batch_number' => 'Batch No',
-                'purchase_price' => 'Purchase Price',
+                'available_quantity' => 'Available Quantity',
+                'cost_price' => 'Cost Price',
                 'sale_price' => 'Sale Price',
-                'stock_remaining' => 'Stock Remaining',
+                'net_amount' => 'Net Amount',
             ],
             'summary' => [
                 'total_rows' => $rowCollection->count(),
-                'stock_remaining' => (float) $rowCollection->sum('stock_remaining'),
+                'available_quantity' => (float) $rowCollection->sum('available_quantity'),
+                'net_amount' => (float) $rowCollection->sum('net_amount'),
             ],
             'rows' => $rows,
         ];
@@ -542,6 +649,17 @@ class InventoryReportService
 
         $this->applyDateRange($purchasedSub, 'inventory_batches.received_date', $filters);
 
+        $purchaseReturnSub = DB::table('orders')
+            ->join('order_items', 'order_items.order_id', '=', 'orders.id')
+            ->where('orders.transaction_type', 'return_out')
+            ->where('orders.tenant_id', $this->tenantId())
+            ->where('order_items.tenant_id', $this->tenantId())
+            ->selectRaw('order_items.product_id as product_id')
+            ->selectRaw('COALESCE(SUM(order_items.quantity + COALESCE(order_items.bonus, 0)), 0) as purchase_return_qty')
+            ->groupBy('order_items.product_id');
+
+        $this->applyDateRange($purchaseReturnSub, 'orders.transaction_date', $filters);
+
         $soldSub = DB::table('orders')
             ->join('order_items', 'order_items.order_id', '=', 'orders.id')
             ->where('orders.transaction_type', 'sale')
@@ -553,24 +671,58 @@ class InventoryReportService
 
         $this->applyDateRange($soldSub, 'orders.transaction_date', $filters);
 
+        $salesReturnSub = DB::table('orders')
+            ->join('order_items', 'order_items.order_id', '=', 'orders.id')
+            ->where('orders.transaction_type', 'return_in')
+            ->where('orders.tenant_id', $this->tenantId())
+            ->where('order_items.tenant_id', $this->tenantId())
+            ->selectRaw('order_items.product_id as product_id')
+            ->selectRaw('COALESCE(SUM(order_items.quantity + COALESCE(order_items.bonus, 0)), 0) as sales_return_qty')
+            ->groupBy('order_items.product_id');
+
+        $this->applyDateRange($salesReturnSub, 'orders.transaction_date', $filters);
+
         $closingSub = DB::table('inventory_batches')
             ->selectRaw('inventory_batches.product_id as product_id')
             ->selectRaw('COALESCE(SUM(inventory_batches.quantity_remaining), 0) as closing_stock')
             ->groupBy('inventory_batches.product_id');
 
         $query = DB::table('products')
+            ->where('products.tenant_id', $this->tenantId())
             ->leftJoinSub($purchasedSub, 'purchased_rows', 'purchased_rows.product_id', '=', 'products.id')
+            ->leftJoinSub($purchaseReturnSub, 'purchase_return_rows', 'purchase_return_rows.product_id', '=', 'products.id')
             ->leftJoinSub($soldSub, 'sold_rows', 'sold_rows.product_id', '=', 'products.id')
+            ->leftJoinSub($salesReturnSub, 'sales_return_rows', 'sales_return_rows.product_id', '=', 'products.id')
             ->leftJoinSub($closingSub, 'closing_rows', 'closing_rows.product_id', '=', 'products.id')
             ->selectRaw('products.id as product_id')
             ->selectRaw('products.name as product_name')
-            ->selectRaw('COALESCE(closing_rows.closing_stock, 0) - COALESCE(purchased_rows.purchased_qty, 0) + COALESCE(sold_rows.sold_qty, 0) as opening_stock')
+            ->selectRaw('COALESCE(closing_rows.closing_stock, 0) - COALESCE(purchased_rows.purchased_qty, 0) + COALESCE(purchase_return_rows.purchase_return_qty, 0) + COALESCE(sold_rows.sold_qty, 0) - COALESCE(sales_return_rows.sales_return_qty, 0) as opening_stock')
             ->selectRaw('COALESCE(purchased_rows.purchased_qty, 0) as purchased')
+            ->selectRaw('COALESCE(purchase_return_rows.purchase_return_qty, 0) as purchase_return')
             ->selectRaw('COALESCE(sold_rows.sold_qty, 0) as sold')
+            ->selectRaw('COALESCE(sales_return_rows.sales_return_qty, 0) as sales_return')
+            ->selectRaw('COALESCE(sold_rows.sold_qty, 0) - COALESCE(sales_return_rows.sales_return_qty, 0) as net_sale')
+            ->selectRaw('COALESCE(products.sale_price, 0) as sale_price')
+            ->selectRaw('(COALESCE(sold_rows.sold_qty, 0) - COALESCE(sales_return_rows.sales_return_qty, 0)) * COALESCE(products.sale_price, 0) as amount')
             ->selectRaw('COALESCE(closing_rows.closing_stock, 0) as closing_stock');
+
+        if (!empty($filters['show_only_positive_stock'])) {
+            $query->havingRaw(
+                'COALESCE(opening_stock, 0) > 0
+                 OR COALESCE(purchased, 0) > 0
+                 OR COALESCE(purchase_return, 0) > 0
+                 OR COALESCE(sold, 0) > 0
+                 OR COALESCE(sales_return, 0) > 0
+                 OR COALESCE(closing_stock, 0) > 0'
+            );
+        }
 
         if (!empty($filters['product_id'])) {
             $query->where('products.id', (int) $filters['product_id']);
+        }
+
+        if (!empty($filters['brand_id'])) {
+            $query->where('products.brand_id', (int) $filters['brand_id']);
         }
 
         if (!empty($filters['search'])) {
@@ -582,7 +734,12 @@ class InventoryReportService
             'product_name' => 'product_name',
             'opening_stock' => 'opening_stock',
             'purchased' => 'purchased',
+            'purchase_return' => 'purchase_return',
             'sold' => 'sold',
+            'sales_return' => 'sales_return',
+            'net_sale' => 'net_sale',
+            'sale_price' => 'sale_price',
+            'amount' => 'amount',
             'closing_stock' => 'closing_stock',
         ], 'closing_stock', 'desc');
 
@@ -590,7 +747,11 @@ class InventoryReportService
             ->selectRaw('COUNT(*) as total_products')
             ->selectRaw('COALESCE(SUM(opening_stock), 0) as opening_stock')
             ->selectRaw('COALESCE(SUM(purchased), 0) as purchased')
+            ->selectRaw('COALESCE(SUM(purchase_return), 0) as purchase_return')
             ->selectRaw('COALESCE(SUM(sold), 0) as sold')
+            ->selectRaw('COALESCE(SUM(sales_return), 0) as sales_return')
+            ->selectRaw('COALESCE(SUM(net_sale), 0) as net_sale')
+            ->selectRaw('COALESCE(SUM(amount), 0) as amount')
             ->selectRaw('COALESCE(SUM(closing_stock), 0) as closing_stock')
             ->first();
 
@@ -601,14 +762,23 @@ class InventoryReportService
                 'product_name' => 'Product Name',
                 'opening_stock' => 'Opening Stock',
                 'purchased' => 'Purchased',
+                'purchase_return' => 'P. Return',
                 'sold' => 'Sold',
+                'sales_return' => 'S. Return',
+                'net_sale' => 'Net Sale',
                 'closing_stock' => 'Closing Stock',
+                'sale_price' => 'Sale Price',
+                'amount' => 'Amount',
             ],
             'summary' => [
                 'total_products' => (int) ($summary->total_products ?? 0),
                 'opening_stock' => (float) ($summary->opening_stock ?? 0),
                 'purchased' => (float) ($summary->purchased ?? 0),
+                'purchase_return' => (float) ($summary->purchase_return ?? 0),
                 'sold' => (float) ($summary->sold ?? 0),
+                'sales_return' => (float) ($summary->sales_return ?? 0),
+                'net_sale' => (float) ($summary->net_sale ?? 0),
+                'amount' => (float) ($summary->amount ?? 0),
                 'closing_stock' => (float) ($summary->closing_stock ?? 0),
             ],
             'rows' => $rows,
@@ -619,19 +789,233 @@ class InventoryReportService
         ];
     }
 
-    public function availableStock(array $filters, bool $forExport = false): array
+    public function salesAndStockBatchWise(array $filters, bool $forExport = false): array
     {
-        $query = DB::table('view_product_stock')
-            ->join('products', 'products.id', '=', 'view_product_stock.product_id')
-            ->where('view_product_stock.current_stock', '>', 0)
+        $purchaseSub = DB::table('inventory_logs')
+            ->join('order_items', 'order_items.id', '=', 'inventory_logs.order_item_id')
+            ->join('orders', 'orders.id', '=', 'order_items.order_id')
+            ->where('orders.transaction_type', 'purchase')
+            ->where('inventory_logs.transaction_type', 'in')
+            ->where('inventory_logs.tenant_id', $this->tenantId())
+            ->where('orders.tenant_id', $this->tenantId())
+            ->selectRaw('inventory_logs.batch_id as batch_id')
+            ->selectRaw('COALESCE(SUM(inventory_logs.quantity_change), 0) as purchased_qty')
+            ->groupBy('inventory_logs.batch_id');
+
+        $this->applyDateRange($purchaseSub, 'orders.transaction_date', $filters);
+
+        $purchaseReturnSub = DB::table('inventory_logs')
+            ->join('order_items', 'order_items.id', '=', 'inventory_logs.order_item_id')
+            ->join('orders', 'orders.id', '=', 'order_items.order_id')
+            ->where('orders.transaction_type', 'return_out')
+            ->where('inventory_logs.transaction_type', 'out')
+            ->where('inventory_logs.tenant_id', $this->tenantId())
+            ->where('orders.tenant_id', $this->tenantId())
+            ->selectRaw('inventory_logs.batch_id as batch_id')
+            ->selectRaw('COALESCE(SUM(ABS(inventory_logs.quantity_change)), 0) as purchase_return_qty')
+            ->groupBy('inventory_logs.batch_id');
+
+        $this->applyDateRange($purchaseReturnSub, 'orders.transaction_date', $filters);
+
+        $soldSub = DB::table('inventory_logs')
+            ->join('order_items', 'order_items.id', '=', 'inventory_logs.order_item_id')
+            ->join('orders', 'orders.id', '=', 'order_items.order_id')
+            ->where('orders.transaction_type', 'sale')
+            ->where('inventory_logs.transaction_type', 'out')
+            ->where('inventory_logs.tenant_id', $this->tenantId())
+            ->where('orders.tenant_id', $this->tenantId())
+            ->selectRaw('inventory_logs.batch_id as batch_id')
+            ->selectRaw('COALESCE(SUM(ABS(inventory_logs.quantity_change)), 0) as sold_qty')
+            ->groupBy('inventory_logs.batch_id');
+
+        $this->applyDateRange($soldSub, 'orders.transaction_date', $filters);
+
+        $salesReturnSub = DB::table('inventory_logs')
+            ->join('order_items', 'order_items.id', '=', 'inventory_logs.order_item_id')
+            ->join('orders', 'orders.id', '=', 'order_items.order_id')
+            ->where('orders.transaction_type', 'return_in')
+            ->where('inventory_logs.transaction_type', 'in')
+            ->where('inventory_logs.tenant_id', $this->tenantId())
+            ->where('orders.tenant_id', $this->tenantId())
+            ->selectRaw('inventory_logs.batch_id as batch_id')
+            ->selectRaw('COALESCE(SUM(inventory_logs.quantity_change), 0) as sales_return_qty')
+            ->groupBy('inventory_logs.batch_id');
+
+        $this->applyDateRange($salesReturnSub, 'orders.transaction_date', $filters);
+
+        $query = DB::table('inventory_batches')
+            ->join('products', 'products.id', '=', 'inventory_batches.product_id')
+            ->leftJoinSub($purchaseReturnSub, 'purchase_return_rows', function ($join): void {
+                $join->on('purchase_return_rows.batch_id', '=', 'inventory_batches.id');
+            })
+            ->leftJoinSub($soldSub, 'sold_rows', function ($join): void {
+                $join->on('sold_rows.batch_id', '=', 'inventory_batches.id');
+            })
+            ->leftJoinSub($salesReturnSub, 'sales_return_rows', function ($join): void {
+                $join->on('sales_return_rows.batch_id', '=', 'inventory_batches.id');
+            })
+            ->where('inventory_batches.tenant_id', $this->tenantId())
+            ->where('products.tenant_id', $this->tenantId())
             ->selectRaw('products.id as product_id')
             ->selectRaw('products.name as product_name')
-            ->selectRaw("'-' as batch_number")
-            ->selectRaw('COALESCE(view_product_stock.current_stock, 0) as available_quantity')
-            ->selectRaw('NULL as warehouse_location');
+            ->selectRaw("COALESCE(inventory_batches.batch_no, '-') as batch_number")
+            ->selectRaw('COALESCE(purchase_rows.purchased_qty, 0) as purchased')
+            ->selectRaw('COALESCE(purchase_return_rows.purchase_return_qty, 0) as purchase_return')
+            ->selectRaw('COALESCE(sold_rows.sold_qty, 0) as sold')
+            ->selectRaw('COALESCE(sales_return_rows.sales_return_qty, 0) as sales_return')
+            ->selectRaw('COALESCE(sold_rows.sold_qty, 0) - COALESCE(sales_return_rows.sales_return_qty, 0) as net_sale')
+            ->selectRaw('COALESCE(inventory_batches.quantity_remaining, 0) as closing_stock')
+            ->selectRaw('(COALESCE(inventory_batches.quantity_remaining, 0) - COALESCE(purchase_rows.purchased_qty, 0) + COALESCE(purchase_return_rows.purchase_return_qty, 0) + COALESCE(sold_rows.sold_qty, 0) - COALESCE(sales_return_rows.sales_return_qty, 0)) as opening_stock')
+            ->selectRaw('COALESCE(inventory_batches.cost_price, 0) as cost_price')
+            ->selectRaw('COALESCE(products.sale_price, 0) as sale_price')
+            ->selectRaw('(COALESCE(sold_rows.sold_qty, 0) - COALESCE(sales_return_rows.sales_return_qty, 0)) * COALESCE(products.sale_price, 0) as amount');
+
+        $query->leftJoinSub($purchaseSub, 'purchase_rows', function ($join): void {
+            $join->on('purchase_rows.batch_id', '=', 'inventory_batches.id');
+        });
+
+        if (!empty($filters['show_only_positive_stock'])) {
+            $query->havingRaw(
+                'COALESCE(opening_stock, 0) > 0
+                 OR COALESCE(purchased, 0) > 0
+                 OR COALESCE(purchase_return, 0) > 0
+                 OR COALESCE(sold, 0) > 0
+                 OR COALESCE(sales_return, 0) > 0
+                 OR COALESCE(closing_stock, 0) > 0'
+            );
+        }
 
         if (!empty($filters['product_id'])) {
             $query->where('products.id', (int) $filters['product_id']);
+        }
+
+        if (!empty($filters['brand_id'])) {
+            $query->where('products.brand_id', (int) $filters['brand_id']);
+        }
+
+        if (!empty($filters['batch_no'])) {
+            $query->where('inventory_batches.batch_no', 'like', '%'.(string) $filters['batch_no'].'%');
+        }
+
+        if (!empty($filters['search'])) {
+            $search = (string) $filters['search'];
+            $query->where(function ($builder) use ($search): void {
+                $builder->where('products.name', 'like', "%{$search}%")
+                    ->orWhere('inventory_batches.batch_no', 'like', "%{$search}%");
+            });
+        }
+
+        $this->applySorting($query, $filters, [
+            'product_name' => 'product_name',
+            'batch_number' => 'batch_number',
+            'opening_stock' => 'opening_stock',
+            'purchased' => 'purchased',
+            'purchase_return' => 'purchase_return',
+            'sold' => 'sold',
+            'sales_return' => 'sales_return',
+            'net_sale' => 'net_sale',
+            'cost_price' => 'cost_price',
+            'sale_price' => 'sale_price',
+            'amount' => 'amount',
+            'closing_stock' => 'closing_stock',
+        ], 'closing_stock', 'desc');
+
+        $summary = DB::query()->fromSub(clone $query, 'sales_stock_batch_rows')
+            ->selectRaw('COUNT(*) as total_batches')
+            ->selectRaw('COALESCE(SUM(opening_stock), 0) as opening_stock')
+            ->selectRaw('COALESCE(SUM(purchased), 0) as purchased')
+            ->selectRaw('COALESCE(SUM(purchase_return), 0) as purchase_return')
+            ->selectRaw('COALESCE(SUM(sold), 0) as sold')
+            ->selectRaw('COALESCE(SUM(sales_return), 0) as sales_return')
+            ->selectRaw('COALESCE(SUM(net_sale), 0) as net_sale')
+            ->selectRaw('COALESCE(SUM(amount), 0) as amount')
+            ->selectRaw('COALESCE(SUM(closing_stock), 0) as closing_stock')
+            ->first();
+
+        $rows = $this->paginateOrCollect($query, $filters, $forExport);
+
+        return [
+            'columns' => [
+                'product_name' => 'Product Name',
+                'batch_number' => 'Batch Number',
+                'opening_stock' => 'Opening Stock',
+                'purchased' => 'Purchased',
+                'purchase_return' => 'P. Return',
+                'sold' => 'Sold',
+                'sales_return' => 'S. Return',
+                'net_sale' => 'Net Sale',
+                'closing_stock' => 'Closing Stock',
+                'sale_price' => 'Sale Price',
+                'amount' => 'Amount',
+            ],
+            'summary' => [
+                'total_batches' => (int) ($summary->total_batches ?? 0),
+                'opening_stock' => (float) ($summary->opening_stock ?? 0),
+                'purchased' => (float) ($summary->purchased ?? 0),
+                'purchase_return' => (float) ($summary->purchase_return ?? 0),
+                'sold' => (float) ($summary->sold ?? 0),
+                'sales_return' => (float) ($summary->sales_return ?? 0),
+                'net_sale' => (float) ($summary->net_sale ?? 0),
+                'amount' => (float) ($summary->amount ?? 0),
+                'closing_stock' => (float) ($summary->closing_stock ?? 0),
+            ],
+            'rows' => $rows,
+            'charts' => [
+                'x_key' => 'batch_number',
+                'y_key' => 'closing_stock',
+            ],
+        ];
+    }
+
+    public function availableStock(array $filters, bool $forExport = false): array
+    {
+        $asOfDate = !empty($filters['as_of_date'])
+            ? Carbon::parse((string) $filters['as_of_date'])->toDateString()
+            : null;
+
+        if ($asOfDate !== null) {
+            // Historical stock as of a selected date.
+            $stockSubquery = DB::table('inventory_logs')
+                ->join('order_items', 'order_items.id', '=', 'inventory_logs.order_item_id')
+                ->join('orders', 'orders.id', '=', 'order_items.order_id')
+                ->where('inventory_logs.tenant_id', $this->tenantId())
+                ->where('orders.tenant_id', $this->tenantId())
+                ->whereDate('orders.transaction_date', '<=', $asOfDate)
+                ->selectRaw('order_items.product_id as product_id')
+                ->selectRaw("COALESCE(SUM(inventory_logs.quantity_change), 0) as available_quantity")
+                ->groupBy('order_items.product_id');
+        } else {
+            // Current stock from remaining quantities in inventory batches.
+            $stockSubquery = DB::table('inventory_batches')
+                ->where('inventory_batches.tenant_id', $this->tenantId())
+                ->selectRaw('inventory_batches.product_id as product_id')
+                ->selectRaw('COALESCE(SUM(inventory_batches.quantity_remaining), 0) as available_quantity')
+                ->groupBy('inventory_batches.product_id');
+        }
+
+        $query = DB::table('products')
+            ->leftJoinSub($stockSubquery, 'stock_rows', function ($join): void {
+                $join->on('stock_rows.product_id', '=', 'products.id');
+            })
+            ->where('products.tenant_id', $this->tenantId())
+            ->selectRaw('products.id as product_id')
+            ->selectRaw('products.name as product_name')
+            ->selectRaw("'-' as batch_number")
+            ->selectRaw('COALESCE(stock_rows.available_quantity, 0) as available_quantity')
+            ->selectRaw('COALESCE(products.cost_price, 0) as cost_price')
+            ->selectRaw('COALESCE(products.sale_price, 0) as sale_price')
+            ->selectRaw('(COALESCE(products.cost_price, 0) * COALESCE(stock_rows.available_quantity, 0)) as net_amount');
+
+        if (!empty($filters['show_only_positive_stock'])) {
+            $query->whereRaw('COALESCE(stock_rows.available_quantity, 0) > 0');
+        }
+
+        if (!empty($filters['product_id'])) {
+            $query->where('products.id', (int) $filters['product_id']);
+        }
+
+        if (!empty($filters['brand_id'])) {
+            $query->where('products.brand_id', (int) $filters['brand_id']);
         }
 
         if (!empty($filters['search'])) {
@@ -647,6 +1031,9 @@ class InventoryReportService
             'product_name' => 'product_name',
             'batch_number' => 'batch_number',
             'available_quantity' => 'available_quantity',
+            'cost_price' => 'cost_price',
+            'sale_price' => 'sale_price',
+            'net_amount' => 'net_amount',
         ], 'available_quantity', 'desc');
 
         $summary = DB::query()->fromSub(clone $query, 'available_rows')
@@ -661,7 +1048,9 @@ class InventoryReportService
                 'product_name' => 'Product Name',
                 'batch_number' => 'Batch No',
                 'available_quantity' => 'Available Quantity',
-                'warehouse_location' => 'Warehouse/Location',
+                'cost_price' => 'Cost Price',
+                'sale_price' => 'Sale Price',
+                'net_amount' => 'Net Amount',
             ],
             'summary' => [
                 'total_batches' => (int) ($summary->total_batches ?? 0),

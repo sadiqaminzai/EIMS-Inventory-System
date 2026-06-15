@@ -30,6 +30,7 @@ import { Modal } from './components/ui/Modal';
 import { DenseInput } from './components/ui/Form';
 import { authApi } from '../api/auth';
 import { toast } from 'sonner';
+import { REPORT_MODULE_MENU_ITEMS } from './reports/reportMeta';
 
 export const Layout = () => {
   // Add safety check for useStore (Force update)
@@ -184,6 +185,26 @@ export const Layout = () => {
     );
   };
 
+  const SubNavItem = ({ to, label }: { to: string, label: string }) => {
+    const active = isActive(to);
+
+    return (
+      <CustomLink
+        to={to}
+        className={clsx(
+          "flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+          active
+            ? "bg-blue-50 text-blue-700"
+            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+        )}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+        <span>{label}</span>
+      </CustomLink>
+    );
+  };
+
+
   const SectionHeader = ({ label, shortLabel }: { label: string, shortLabel: string }) => (
     <div className={clsx("text-[10px] font-bold text-gray-400 uppercase px-3 pt-2 pb-0.5", (collapsed && !isMobile) && "text-center")}>
       {(collapsed && !isMobile) ? shortLabel : label}
@@ -236,6 +257,10 @@ export const Layout = () => {
         </div>
     );
   };
+
+  const visibleReportModules = REPORT_MODULE_MENU_ITEMS.filter((item) =>
+    item.permissions.some((permission) => hasPermission(permission))
+  );
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden font-sans">
@@ -339,8 +364,12 @@ export const Layout = () => {
           <NavItem to="/payables" label="Payables" icon={ShoppingCart} perm="purchase.view" />
           <NavItem to="/accounts" label="Accounts" icon={Wallet} perm="account.view" />
 
-          {(hasPermission('manage_orders') || hasPermission('manage_inventory') || hasPermission('sales.view') || hasPermission('invoices.view') || hasPermission('inventory.view') || hasPermission('purchase.view') || hasPermission('customer.view') || hasPermission('product.view') || hasPermission('brand.view') || hasPermission('report.view') || hasPermission('reports.view')) && (
-            <NavItem to="/reports" label="Reports" icon={FileText} />
+          {visibleReportModules.length > 0 && (
+            <NavGroup label="Reports" icon={FileText}>
+              {visibleReportModules.map((item) => (
+                <SubNavItem key={item.key} to={`/reports/${item.key}`} label={item.label} />
+              ))}
+            </NavGroup>
           )}
 
           {/* Settings - show if user has any settings permission */}

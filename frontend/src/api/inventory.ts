@@ -32,7 +32,7 @@ export interface InventoryBatch {
 
 export const inventoryApi = {
   // Products
-  getProducts: async (params?: { page?: number; search?: string }) => {
+  getProducts: async (params?: { page?: number; search?: string; brand_id?: string | number; per_page?: number }) => {
     const response = await apiClient.get('/products', { params });
     return response.data;
   },

@@ -638,8 +638,9 @@ export const useStore = create<AppState>((set, get) => ({
       const bootstrapRequestId = ++bootstrapRequestCounter;
 
       // Get current user's role to determine what to load
-      const currentRole = get().currentUser.role?.toLowerCase();
-      const isSuperAdmin = currentRole === 'superadmin';
+      const currentRole = String(get().currentUser.role ?? '').toLowerCase();
+      // Treat users with role containing 'super' or without tenant_id as super admin
+      const isSuperAdmin = currentRole.includes('super') || !String(get().currentUser.tenant_id || '').trim();
 
       // Base requests that all authenticated users can access
       const baseRequests = [

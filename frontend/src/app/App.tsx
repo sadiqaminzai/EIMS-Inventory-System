@@ -12,6 +12,7 @@ import { PayablesPage } from './pages/PayablesPage';
 import { ReceivablesPage } from './pages/ReceivablesPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { DEFAULT_REPORT_MODULE_KEY } from './reports/reportMeta';
 // Use sonner directly to avoid missing ThemeProvider issue in local wrapper
 import { Toaster } from 'sonner';
 
@@ -50,7 +51,8 @@ const routes = [
       { path: "finance", element: <Navigate to="/accounts" replace /> },
       { path: "payables", element: <PayablesPage /> },
       { path: "receivables", element: <ReceivablesPage /> },
-      { path: "reports", element: <ReportsPage /> },
+      { path: "reports", element: <Navigate to={`/reports/${DEFAULT_REPORT_MODULE_KEY}`} replace /> },
+      { path: "reports/:moduleKey", element: <ReportsPage /> },
       { path: "settings", element: <SettingsPage /> },
       { path: "*", element: <Navigate to="/dashboard" replace /> }
     ]
