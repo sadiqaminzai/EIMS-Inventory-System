@@ -87,7 +87,10 @@ class UserController extends Controller
 
         if ($request->hasFile('avatar')) {
             $path = $request->file('avatar')->store('users', 'public');
-            $data['avatar'] = Storage::url($path);
+            // Use the public disk explicitly (default disk is 'local') so the URL
+            // is /storage/... — consistent with product photo and tenant logo, and
+            // mapped to /media/... by the frontend resolveAssetUrl helper.
+            $data['avatar'] = Storage::disk('public')->url($path);
         } else {
             unset($data['avatar']);
         }
@@ -183,7 +186,10 @@ class UserController extends Controller
 
         if ($request->hasFile('avatar')) {
             $path = $request->file('avatar')->store('users', 'public');
-            $data['avatar'] = Storage::url($path);
+            // Use the public disk explicitly (default disk is 'local') so the URL
+            // is /storage/... — consistent with product photo and tenant logo, and
+            // mapped to /media/... by the frontend resolveAssetUrl helper.
+            $data['avatar'] = Storage::disk('public')->url($path);
         } else {
             unset($data['avatar']);
         }

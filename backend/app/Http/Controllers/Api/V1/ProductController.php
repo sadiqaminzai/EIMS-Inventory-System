@@ -35,7 +35,15 @@ class ProductController extends Controller
             $query->where('products.brand_id', (int) $request->input('brand_id'));
         }
 
-        $items = $query->paginate(50);
+        // Respect a client-supplied per_page. A value <= 0 (or 'all') returns every
+        // record in one page — the SPA loads the full product list into its store.
+        $perPage = (int) $request->input('per_page', 50);
+        if ($perPage <= 0) {
+            $perPage = 100000;
+        }
+        $perPage = min($perPage, 100000);
+
+        $items = $query->paginate($perPage);
 
         $items->getCollection()->transform(function ($product) {
             return $this->transformProduct($product);

@@ -292,7 +292,7 @@ export const Dashboard = () => {
   const handleAddTransaction = (data: any) => { addTransaction(data); setIsTxModalOpen(false); };
 
   return (
-    <div className="mx-auto max-w-[1600px] space-y-5">
+    <div className="w-full space-y-5">
       {/* Header + date filter */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
@@ -340,7 +340,7 @@ export const Dashboard = () => {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard
           title="Sales Amount"
           value={formatNumber(cur.salesAmount)}

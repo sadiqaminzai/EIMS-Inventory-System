@@ -693,7 +693,7 @@ export const useStore = create<AppState>((set, get) => ({
         () => brandApi.list(),
         () => categoryApi.list(),
         () => countryApi.list(),
-        () => inventoryApi.getProducts(),
+        () => inventoryApi.getProducts({ per_page: 0 }), // per_page 0 => fetch all products (no 50-row cap)
         () => supplierApi.list(),
         () => customerApi.list(),
         () => accountApi.list(),

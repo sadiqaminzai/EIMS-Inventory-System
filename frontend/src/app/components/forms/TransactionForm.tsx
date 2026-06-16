@@ -114,7 +114,7 @@ export const TransactionForm = ({ initialData, paymentData, allowedTypesOverride
     const typePermissions: Record<TransactionTypeOption, string> = {
         Payment: 'account.transaction.payment',
         Income: 'account.transaction.income',
-        Expense: 'account.transaction.expense',
+        Expense: 'account.transaction.expense', 
         Transfer: 'account.transaction.transfer'
     };
     const allTypes: TransactionTypeOption[] = ['Payment', 'Income', 'Expense', 'Transfer'];

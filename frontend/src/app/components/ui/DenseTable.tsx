@@ -234,8 +234,9 @@ export const DenseTable = <T extends object>({
         </table>
       </div>
 
-      {/* Footer */}
-      <div className="bg-gray-50 border-t border-gray-200 px-4 py-1.5 flex items-center justify-between text-xs text-gray-500">
+      {/* Footer — sticky to the bottom so record count + pagination stay visible
+          even when the table is taller than the viewport on smaller screens. */}
+      <div className="sticky bottom-0 z-10 rounded-b-lg bg-gray-50 border-t border-gray-200 px-4 py-1.5 flex items-center justify-between text-xs text-gray-500">
         <div>
           Showing {sortedData.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} to{' '}
           {Math.min(currentPage * itemsPerPage, sortedData.length)} of {sortedData.length} entries
