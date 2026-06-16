@@ -27,6 +27,8 @@ interface DenseTableProps<T> {
   defaultSort?: { key: keyof T; direction: 'asc' | 'desc' };
   headerAfterSearch?: React.ReactNode;
   tableContainerClassName?: string;
+  /** Initial rows-per-page (the user can still change it via the Rows selector). */
+  defaultPageSize?: number;
 }
 
 export const DenseTable = <T extends object>({
@@ -43,7 +45,8 @@ export const DenseTable = <T extends object>({
   canExportPdf,
   defaultSort,
   headerAfterSearch,
-  tableContainerClassName
+  tableContainerClassName,
+  defaultPageSize = 50
 }: DenseTableProps<T>) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -51,7 +54,7 @@ export const DenseTable = <T extends object>({
     key: defaultSort?.key || null, 
     direction: defaultSort?.direction || 'asc' 
   });
-  const itemsPerPage = 50;
+  const [itemsPerPage, setItemsPerPage] = useState(defaultPageSize);
 
   // Search Logic (Elastic Search across all string fields)
   const filteredData = useMemo(() => {
@@ -232,14 +235,33 @@ export const DenseTable = <T extends object>({
             )}
           </tbody>
         </table>
+        <div className="h-12" aria-hidden="true" />
       </div>
 
-      {/* Footer — sticky to the bottom so record count + pagination stay visible
-          even when the table is taller than the viewport on smaller screens. */}
+      {/* Footer */}
       <div className="sticky bottom-0 z-10 rounded-b-lg bg-gray-50 border-t border-gray-200 px-4 py-1.5 flex items-center justify-between text-xs text-gray-500">
-        <div>
-          Showing {sortedData.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} to{' '}
-          {Math.min(currentPage * itemsPerPage, sortedData.length)} of {sortedData.length} entries
+        <div className="flex items-center gap-3">
+          <span>
+            Showing {sortedData.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} to{' '}
+            {Math.min(currentPage * itemsPerPage, sortedData.length)} of {sortedData.length} entries
+          </span>
+          <label className="flex items-center gap-1">
+            <span className="hidden sm:inline">Rows:</span>
+            <select
+              value={itemsPerPage}
+              onChange={(e) => {
+                setItemsPerPage(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className="border border-gray-300 rounded px-1 py-0.5 text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+              <option value={100000}>All</option>
+            </select>
+          </label>
         </div>
         <div className="flex items-center gap-1">
           <button

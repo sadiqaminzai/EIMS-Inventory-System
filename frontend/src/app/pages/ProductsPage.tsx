@@ -324,10 +324,11 @@ export const ProductsPage = () => {
 
   return (
     <>
-      <DenseTable 
-        data={filteredProducts} 
-        columns={columns} 
+      <DenseTable
+        data={filteredProducts}
+        columns={columns}
         title="Inventory"
+        defaultPageSize={100}
         onAdd={handleAdd}
         canAdd={hasPermission('product.create')}
         addLabel="Product"

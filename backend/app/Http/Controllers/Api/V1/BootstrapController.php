@@ -90,7 +90,7 @@ class BootstrapController extends Controller
                 $join->on('view_product_stock.product_id', '=', 'products.id')
                     ->on('view_product_stock.tenant_id', '=', 'products.tenant_id');
             })
-            ->paginate(50);
+            ->paginate(100000);
 
         $items->getCollection()->transform(fn (Product $product) => [
             'id' => $product->id,

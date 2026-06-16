@@ -35,9 +35,10 @@ class ProductController extends Controller
             $query->where('products.brand_id', (int) $request->input('brand_id'));
         }
 
-        // Respect a client-supplied per_page. A value <= 0 (or 'all') returns every
-        // record in one page — the SPA loads the full product list into its store.
-        $perPage = (int) $request->input('per_page', 50);
+        // The SPA loads the full product list into its store, so return every record
+        // by default. A client may still request a specific page size via per_page.
+        // (per_page <= 0 or omitted => all, capped at 100000 for safety.)
+        $perPage = (int) $request->input('per_page', 0);
         if ($perPage <= 0) {
             $perPage = 100000;
         }
