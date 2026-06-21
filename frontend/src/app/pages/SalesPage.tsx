@@ -78,23 +78,37 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
   const [batchCache, setBatchCache] = useState<Record<number, InventoryBatch[]>>({});
   const [focusedProductId, setFocusedProductId] = useState<string>('');
 
-  const getOriginalTotalForRow = (item: any) => {
+  const getItemTotal = (item: any) => (Number(item?.quantity) || 0) + (Number(item?.bonus) || 0);
+
+  const getOriginalTotalForProductInForm = (productId: string) => {
     if (!initialData) return 0;
-    const currentProductId = item?.product_id;
+    const currentProductId = String(productId ?? '').trim();
     if (!currentProductId) return 0;
 
-    const orderItemId = String(item?.order_item_id ?? '').trim();
-    if (!orderItemId) return 0;
+    return (initialData.items || []).reduce((sum: number, original: any) => {
+      const originalProductId = String(original?.product_id ?? '').trim();
+      if (originalProductId !== currentProductId) {
+        return sum;
+      }
 
-    const originalItem = initialData.items?.find(
-      (original: any) => String(original?.order_item_id ?? '').trim() === orderItemId
+      return sum + getItemTotal(original);
+    }, 0);
+  };
+
+  const getEditMaxAllowedForProduct = (productId: string, currentRowIndex: number) => {
+    const currentProductId = String(productId ?? '').trim();
+    if (!currentProductId) return 0;
+
+    const usedInOtherRows = items.reduce((sum, row, rowIndex) => {
+      if (rowIndex === currentRowIndex) return sum;
+      if (String(row.product_id ?? '').trim() !== currentProductId) return sum;
+      return sum + getItemTotal(row);
+    }, 0);
+
+    return Math.max(
+      getTotalStock(currentProductId) + getOriginalTotalForProductInForm(currentProductId) - usedInOtherRows,
+      0
     );
-
-    if (!originalItem || originalItem.product_id !== currentProductId) {
-      return 0;
-    }
-
-    return (originalItem.quantity || 0) + (originalItem.bonus || 0);
   };
 
   useEffect(() => {
@@ -261,7 +275,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
 
     const used = items
       .filter(i => i.product_id === productId)
-      .reduce((sum, i) => sum + (i.quantity || 0) + (i.bonus || 0), 0);
+      .reduce((sum, i) => sum + getItemTotal(i), 0);
 
     let remainingUsed = used;
     for (const batch of batches) {
@@ -308,7 +322,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                     });
                 }
                 const current = batchMap.get(b)!;
-                current.qty += i.quantity + (i.bonus || 0);
+                current.qty += getItemTotal(i);
                 if (new Date(p.purchase_date) < new Date(current.date)) {
                     current.date = p.purchase_date;
                 }
@@ -322,7 +336,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
         if (i.product_id === productId) {
           const b = i.batch_no || 'N/A';
           if (batchMap.has(b)) {
-            batchMap.get(b)!.qty -= (i.quantity + (i.bonus || 0));
+            batchMap.get(b)!.qty -= getItemTotal(i);
           }
         }
       });
@@ -334,7 +348,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
         if (i.product_id === productId) {
           const b = i.batch_no || 'N/A';
           if (batchMap.has(b)) {
-            batchMap.get(b)!.qty += (i.quantity + (i.bonus || 0));
+            batchMap.get(b)!.qty += getItemTotal(i);
           }
         }
       });
@@ -359,7 +373,7 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
 
     const used = items
       .filter((i, idx) => idx !== rowIndex && i.product_id === productId)
-      .reduce((sum, i) => sum + (i.quantity || 0) + (i.bonus || 0), 0);
+      .reduce((sum, i) => sum + getItemTotal(i), 0);
 
     let remainingUsed = used;
     for (const batch of batches) {
@@ -543,12 +557,13 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                             const useFifo = invoiceType === 'sale';
                             const fifoQty = getFifoRemainingStock(p.id);
                             const totalQty = getTotalStock(p.id);
+                            const editOriginalQty = initialData ? getOriginalTotalForProductInForm(p.id) : 0;
                             const displayQty = useFifo ? fifoQty : totalQty;
                             return {
                               value: p.id,
                               label: `${p.name} (Qty: ${displayQty})`,
                               disabled: (invoiceType === 'sale' || invoiceType === 'return_out')
-                                ? fifoQty <= 0
+                                ? fifoQty + editOriginalQty <= 0
                                 : false
                             };
                           })}
@@ -597,16 +612,9 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                         if (initialData && (invoiceType === 'sale' || invoiceType === 'return_out')) {
                           const item = items[index];
                           if (!item?.product_id) return true;
-                          const currentBonus = item.bonus || 0;
+                          const currentBonus = Number(item.bonus) || 0;
                           const totalReq = (value || 0) + currentBonus;
-                          const originalTotal = getOriginalTotalForRow(item);
-                          const usedInOtherRows = items.reduce((sum, row, rowIndex) => {
-                            if (rowIndex === index) return sum;
-                            if (row.product_id !== item.product_id) return sum;
-                            return sum + (row.quantity || 0) + (row.bonus || 0);
-                          }, 0);
-                          const availableNow = getTotalStock(item.product_id);
-                          const maxAllowed = Math.max(availableNow + originalTotal - usedInOtherRows, 0);
+                          const maxAllowed = getEditMaxAllowedForProduct(item.product_id, index);
                           if (totalReq > maxAllowed) return `Max ${maxAllowed} (incl original)`;
                           return true;
                         }
@@ -626,10 +634,10 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                         }
                         let usedInOtherRows = 0;
                         items.forEach((i, idx) => {
-                          if (idx !== index && i.product_id === item.product_id) {
+                            if (idx !== index && String(i.product_id ?? '') === String(item.product_id ?? '')) {
                             const b = i.batch_no || 'N/A';
                             if (b === currentBatchNo) {
-                              usedInOtherRows += (i.quantity || 0) + (i.bonus || 0);
+                              usedInOtherRows += getItemTotal(i);
                             }
                           }
                         });
@@ -657,16 +665,9 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                         if (initialData && (invoiceType === 'sale' || invoiceType === 'return_out')) {
                         const item = items[index];
                         if (!item?.product_id) return true;
-                          const currentQty = item.quantity || 0;
+                          const currentQty = Number(item.quantity) || 0;
                           const totalReq = currentQty + (value || 0);
-                          const originalTotal = getOriginalTotalForRow(item);
-                          const usedInOtherRows = items.reduce((sum, row, rowIndex) => {
-                            if (rowIndex === index) return sum;
-                            if (row.product_id !== item.product_id) return sum;
-                            return sum + (row.quantity || 0) + (row.bonus || 0);
-                          }, 0);
-                          const availableNow = getTotalStock(item.product_id);
-                          const maxAllowed = Math.max(availableNow + originalTotal - usedInOtherRows, 0);
+                          const maxAllowed = getEditMaxAllowedForProduct(item.product_id, index);
                           if (totalReq > maxAllowed) return `Max ${maxAllowed} (incl original)`;
                           return true;
                         }
@@ -685,10 +686,10 @@ const SaleForm = ({ initialData, onSave, onCancel }: { initialData?: Sale, onSav
                           }
                           let usedInOtherRows = 0;
                           items.forEach((i, idx) => {
-                            if (idx !== index && i.product_id === item.product_id) {
+                            if (idx !== index && String(i.product_id ?? '') === String(item.product_id ?? '')) {
                               const b = i.batch_no || 'N/A';
                               if (b === currentBatchNo) {
-                                usedInOtherRows += (i.quantity || 0) + (i.bonus || 0);
+                                usedInOtherRows += getItemTotal(i);
                               }
                             }
                           });
